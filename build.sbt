@@ -31,9 +31,13 @@ val os   = sys.props.getOrElse("os.name", "").toLowerCase
 val arch = sys.props.getOrElse("os.arch", "").toLowerCase
 
 val platform =
-  if (os.contains("mac")) // TODO: we don't have binaries for amd64 yet.
-    if (arch.contains("64") "macos-x86_64" else "macos-arm64"
-  else "linux-x86_64"
+  if (os.contains("mac")) {
+    if (arch.contains("aarch64") || arch.contains("arm")) "macos-arm64"
+    else "macos-x86_64"
+  } else {
+    "linux-x86_64"
+  }
+
 
 lazy val pPrint = settingKey[Unit]("example")
 
