@@ -794,14 +794,10 @@ object Core {
       p
     }
     def freshVar[S <: Sort[S]](sort: S): Core.Var[S] = {
-
-      import org.abstractpredicates.helpers.SystemState.Counter
-
+      
       @tailrec
       def aux(pref: String): String =
-        val idx = Counter.next()
-        val suf = s"_${idx}_"
-        val s = pref + suf
+        val s = Utils.getUniqueName(pref)
         e(s) match {
           case Some(_) => aux(s)
           case None => s
@@ -827,6 +823,42 @@ object Core {
       expr
     }
   }
+
+  //
+  // Extractor objects for helping preserve return sorts during pattern-matching
+  //
+  object And {
+    def unapply(e: BoxedExpr): Option[List[Expr[BoolSort]]] = e.e match
+      case Lop("and", es, _, _) =>
+        Some(es.asInstanceOf[List[Expr[BoolSort]]])
+      case _ => None
+  }
+
+  object Or {
+    def unapply(e: BoxedExpr): Option[List[Expr[BoolSort]]] = e.e match
+      case Lop("or", es, _, _) =>
+        Some(es.asInstanceOf[List[Expr[BoolSort]]])
+      case _ => None
+  }
+
+  object Not {
+    def unapply(e: BoxedExpr): Option[Expr[BoolSort]] = e.e match
+      case Uop("not", x, _) =>
+        Some(x.asInstanceOf[Expr[BoolSort]])
+      case _ => None
+  }
+
+  object Implies {
+    def unapply(e: BoxedExpr): Option[(Expr[BoolSort], Expr[BoolSort])] = e.e match
+      case Bop("=>", a, b, _) =>
+        Some((a.asInstanceOf[Expr[BoolSort]], b.asInstanceOf[Expr[BoolSort]]))
+      case _ => None
+  }
+
+
+  //
+  // Methods for helping create expressions
+  //
 
   def mkTrue: Expr[BoolSort] =
     Core.Const(SortValue.BoolValue(true))
@@ -1011,5 +1043,6 @@ object Core {
 
   given aConversion[D <: Sort[D], R <: Sort[R]]: Conversion[(Expr[R], ArraySort[D, R]), SortValue.ArrayValue[D, R]] with
     def apply(e: (Expr[R], ArraySort[D, R])) = SortValue.ArrayValue(e._1, e._2)
+
 
 } 

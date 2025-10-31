@@ -34,11 +34,11 @@ object TransitionFormula {
     val solverEnv: SolverEnvironment
 
     def peel(expr: Core.Expr[Core.BoolSort]): Peeled = {
-      val solver = solverEnv.solver 
-      (expr: @unchecked) match { // TODO; this is fine for now.
-        case Core.Lop("or", args, BoolSort(), BoolSort()) =>
+      val solver = solverEnv.solver
+      expr match { // TODO; this is fine for now.
+        case Core.Or(args) =>
           Peeled.Disjunctive(args.map(x => peel(x)))
-        case Core.Bop[BoolSort, BoolSort, BoolSort] ("=>", prem, concl, BoolSort () ) =>
+        case Core.Implies(prem, concl) =>
           Peeled.Implicative(List(), List(Peeled.Branch(prem, peel(concl))))
         case Core.Lop("and", args, BoolSort(), BoolSort()) =>
           //
@@ -59,7 +59,11 @@ object TransitionFormula {
             }
 
           val branchesP: List[Peeled.Branch] = branches map {
-            case Core.Bop[BoolSort, BoolSort, BoolSort]("=>", a, b, BoolSort()) => Peeled.Branch(a, peel(b))
+            case Core.Bop[BoolSort
+            , BoolSort
+            , BoolSort
+            ] ("=>", a, b, BoolSort())
+            => Peeled.Branch(a, peel(b))
             case d => failwith(s"impossible ${d}")
           }
 
@@ -102,7 +106,6 @@ object TransitionFormula {
   }
 
   object Peeler {
-
     def apply(solverO: SolverEnvironment)(expr: Expr[BoolSort]): Peeled = {
       new Peeler {
         override val solverEnv = solverO.solver.fork().box
@@ -110,44 +113,80 @@ object TransitionFormula {
     }
   }
 
-  case class Transition(interpEnv: InterpEnv, typeEnv: TypeEnv, expr: Expr[BoolSort], val stateVars: Set[TimedVariable]) {
+  case class Transition(interpEnv: InterpEnv,
+                        typeEnv: TypeEnv,
+                        exprs: List[Expr[BoolSort]], val stateVars: Set[TimedVariable]) {
 
-    def getExprs: Expr[BoolSort] = expr
+    def getExprs: List[Expr[BoolSort]] = exprs
 
-    def renameCurrStateVariables(): Expr[BoolSort] = {
-      val renameMap = scala.collection.mutable.Map[String, String]()
-      stateVars.foreach(x => renameMap.update(x.getOriginalName, x.skolemized._1))
-      (new VariableRenamer(renameMap.toMap)).visit(interpEnv)(expr)
+    def choices = exprs.size
+
+    def renameCurrStateVariables(): List[Expr[BoolSort]] = {
+      exprs.map(expr =>
+        val renameMap = scala.collection.mutable.Map[String, String]()
+        stateVars.foreach(x => renameMap.update(x.getOriginalName, x.skolemized._1))
+        (new VariableRenamer(renameMap.toMap)).visit(interpEnv)(expr)
+      )
     }
 
-    def renameNextStateVariables(): Expr[BoolSort] = {
-      val renameMap = scala.collection.mutable.Map[String, String]()
-      stateVars.foreach(x => renameMap.update(x.getNextState, x.skolemized._1))
-      (new VariableRenamer(renameMap.toMap)).visit(interpEnv)(expr)
+    def renameNextStateVariables(): List[Expr[BoolSort]] = {
+      exprs.map(expr =>
+        val renameMap = scala.collection.mutable.Map[String, String]()
+        stateVars.foreach(x => renameMap.update(x.getNextState, x.skolemized._1))
+        (new VariableRenamer(renameMap.toMap)).visit(interpEnv)(expr)
+      )
     }
+
+    def projectCurrState(): List[Expr[BoolSort]] = {
+      renameCurrStateVariables().map(expr =>
+        Core.mkForall(stateVars.toList.map(x => x.skolemized), expr)
+      )
+    }
+
+    def projectNextState(): List[Expr[BoolSort]] = {
+      renameNextStateVariables().map(expr =>
+        Core.mkForall(stateVars.toList.map(x => x.skolemized), expr)
+      )
+    }
+
+    def isZero: Boolean = exprs == List(Core.mkFalse)
+
+    def isOne: Boolean = exprs == List()
   }
 
-  given r: IdempotentSemiring[Transition] with
+  given r: IdempotentSemiring[Transition] with {
+    override def zero: Transition = Transition(Core.emptyInterpEnv, Core.emptyTypeEnv, List(Core.mkFalse), Set())
 
-    def zero: Transition = Transition(Core.emptyInterpEnv, Core.emptyTypeEnv, Core.mkFalse, Set())
+    override def one: Transition = Transition(Core.emptyInterpEnv, Core.emptyTypeEnv, List(), Set())
 
-    def one(interpEnv: InterpEnv, typeEnv: TypeEnv, stateVars: Set[TimedVariable]): Transition =
-      Transition(interpEnv, typeEnv, Core.mkAnd(stateVars.map(x => x.identity).toList), stateVars)
-
-    def plus(x: Transition, y: Transition): Transition = {
-      if x.stateVars != y.stateVars then unsupported("cannot add transition formulas with different state variables")
+    override def plus(x: Transition, y: Transition): Transition = {
+      if x.stateVars != y.stateVars then
+        unsupported("cannot add transition formulas with different state variables")
       Transition(x.interpEnv ++@ y.interpEnv, x.typeEnv ++@ y.typeEnv,
-        Core.mkOr(List(x.getExprs, y.getExprs)), x.stateVars)
+        x.getExprs ++ y.getExprs, x.stateVars)
     }
 
-    def times(x: Transition, y: Transition): Transition = {
-      if x.stateVars != y.stateVars then unsupported("cannot multiply transition formulas with different state variables")
-      val boundVars = x.stateVars.toList.map(v => v.skolemized)
-      Transition(x.interpEnv ++@ y.interpEnv, x.typeEnv ++@ y.typeEnv,
-        Core.mkExists(boundVars, Core.mkAnd(List(x.renameNextStateVariables(), y.renameCurrStateVariables()))),
-        x.stateVars)
+    //
+    // This opens up an interesting design space.
+    // For f * g, f is a list and g is a list,
+    // so if we flattened out the resultant list, there are really (f * g) options.
+    override def times(ff: Transition, gg: Transition): Transition = {
+      if ff.stateVars != gg.stateVars then
+        unsupported("cannot multiply transition formulas with different state variables")
+
+      val boundVars = ff.stateVars.toList.map(v => v.skolemized)
+      val f = ff.renameNextStateVariables()
+      val g = gg.renameCurrStateVariables()
+
+      val f_g = f.map(f_expr =>
+        g.map(g_expr =>
+          Core.mkExists(boundVars, Core.mkAnd(List(f_expr)))
+        )
+      )
+
+      Transition(ff.interpEnv ++@ gg.interpEnv, ff.typeEnv ++@ gg.typeEnv,
+        f_g.flatten,
+        ff.stateVars)
     }
-
-    override def one: Transition = failwith("")
-
+  }
 }

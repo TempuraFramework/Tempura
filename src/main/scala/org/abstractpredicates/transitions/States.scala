@@ -1,7 +1,7 @@
 package org.abstractpredicates.transitions
 
 import org.abstractpredicates.abstraction.ConcreteDomain
-import org.abstractpredicates.expression.Core
+import org.abstractpredicates.expression.{Core, VariableRenamer}
 import org.abstractpredicates.smt.SmtSolver.*
 
 object States {
@@ -25,6 +25,13 @@ object States {
     def getModels: List[Model[solver.LoweredTerm, solver.LoweredVarDecl]] = List(model)
 
     def summarize: Core.Expr[Core.BoolSort] = model.formula()
+
+    def primed: Core.Expr[Core.BoolSort] = {
+      val fmla = model.formula()
+      val renamer = VariableRenamer(stateVars.map(x => (x.getOriginalName, x.getNextState)).toMap[String, String])
+      val fmlaPrimed = renamer.visit(solver.solver.getInterp)(fmla)
+      fmlaPrimed
+    }
   }
 
 }

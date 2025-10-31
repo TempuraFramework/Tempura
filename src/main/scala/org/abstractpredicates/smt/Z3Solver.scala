@@ -12,6 +12,9 @@ import org.abstractpredicates.expression.Core.*
 import org.abstractpredicates.smt.SmtSolver.Result
 import org.abstractpredicates.helpers.Utils.*
 
+import scala.collection.mutable.ArrayDeque as Stack
+
+
 object Z3Solver {
 
   class Z3Solver(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)
@@ -26,7 +29,6 @@ object Z3Solver {
 
     override type LoweredSort = z3.Sort
 
-    private var logic: SmtSolver.Logic = Nil
     private var history: List[String] = List()
 
     private def appendHistory(s: String): Unit = history = s :: history
@@ -434,32 +436,6 @@ object Z3Solver {
       }
     }
 
-    private def parseBackLambdaTerms(args: List[(String, LoweredSort)],
-                                     body: LoweredTerm,
-                                     retSort: LoweredSort,
-                                     overallArraySort: LoweredSort): Either[String, Core.BoxedExpr] = {
-      val argNames = args.map(x => x._1)
-      val bodyT = liftTerm(body)
-      val argSortsT = args.map(x => x._2).map(liftSort)
-      val retSortT = liftSort(retSort)
-      val overallSortT = liftSort(overallArraySort)
-      bodyT.unify(retSortT) match {
-        case Some(unifiedBody) =>
-          val macroExpr = Core.mkMacro("lambda", argNames.zip(argSortsT), unifiedBody)
-          overallSortT.sort match {
-            case Core.ArraySort(domSort, rangeSort) =>
-              retSortT.unify(rangeSort) match {
-                case Some(unifiedRetSort) =>
-                  Right(Core.mkAsArray(macroExpr, Core.ArraySort(domSort, unifiedRetSort)))
-                case None =>
-                  Left(s"parseBackLambdaTerm: translated array sort ${overallSortT} does not agree with range ${retSort}")
-              }
-            case _ => Left(s"parseBackLambdaTerm: translated array sort is not an array sort: ${overallSortT}")
-          }
-        case None =>
-          Left(s"parseBackLambdaTerm: failed to unify lambda body ${bodyT} with return sort ${retSortT}")
-      }
-    }
 
     // Reference for Z3 OPCODEs: https://z3prover.github.io/api/html/group__capi.html#ga1fe4399e5468621e2a799a680c6667cd
     // Reference 2: https://pub.dev/documentation/z3/latest/z3_ffi/Z3_decl_kind-class.html
@@ -546,17 +522,25 @@ object Z3Solver {
       }
     }
 
+    private val deBruijnStack = Stack[String]()
+
     override def liftTerm(expr: LoweredTerm): BoxedExpr = {
       expr match {
         // Quantifier expressions must precede bool expressions, because Quantifier <: BoolExpr
         case quantifiedExpr: z3.Quantifier =>
           val isUniversal = quantifiedExpr.isUniversal
+          // argNames: highest de-Bruijn index is last, lowest is first.
           val argNames = quantifiedExpr.getBoundVariableNames.toList.map(x => x.toString)
+
+          deBruijnStack.appendAll(argNames)
+
           val argSorts = quantifiedExpr.getBoundVariableSorts.toList
           val body = quantifiedExpr.getBody
 
           val expr = liftTerm(body.asInstanceOf[LoweredTerm])
           val argSortsT = argSorts.map(liftSort)
+
+          deBruijnStack.remove(0, argNames.size)
 
           expr.unify(Core.BoolSort()) match {
             case Some(boolBodyExpr) =>
@@ -573,14 +557,38 @@ object Z3Solver {
         // lambda expressions from D->R have type ArraySort[D, R]
         case lambdaExpr: z3.Lambda[r] =>
           val argNames = lambdaExpr.getBoundVariableNames.toList.map(x => x.toString)
+
+          deBruijnStack.appendAll(argNames)
+
           val argSorts = lambdaExpr.getBoundVariableSorts.toList
-          val body = lambdaExpr.getBody
+          val body = lambdaExpr.getBody.asInstanceOf[LoweredTerm]
           val retSort = body.getSort
           val overallSort = lambdaExpr.getSort
-          parseBackLambdaTerms(argNames.zip(argSorts), body.asInstanceOf[LoweredTerm], retSort, overallSort) match {
-            case Right(r) => r
-            case Left(reason) => unexpected(reason, expr)
+
+          val bodyT = liftTerm(body)
+          val argSortsT = argSorts.map(liftSort)
+          val retSortT = liftSort(retSort)
+          val overallSortT = liftSort(overallSort)
+
+          deBruijnStack.remove(0, argNames.size)
+
+          bodyT.unify(retSortT) match {
+            case Some(unifiedBody) =>
+              val macroExpr = Core.mkMacro(getUniqueName("lambda"), argNames.zip(argSortsT), unifiedBody)
+              overallSortT.sort match {
+                case Core.ArraySort(domSort, rangeSort) =>
+                  retSortT.unify(rangeSort) match {
+                    case Some(unifiedRetSort) =>
+                      Core.mkAsArray(macroExpr, Core.ArraySort(domSort, unifiedRetSort))
+                    case None =>
+                      unexpected(s"liftTerm: lambda term's array sort ${overallSortT} does not agree with range ${retSort}")
+                  }
+                case _ => unexpected(s"liftTerm: lambda term's array sort is not an array sort: ${overallSortT}")
+              }
+            case None =>
+              unexpected(s"liftTerm: failed to unify lambda body ${bodyT} with return sort ${retSortT}")
           }
+
         // XXX: variables and constants are both Constants to Z3, so we distinguish them in `case _`.
         // case handling variables as terms, notice Const in Z3 = Vars in our framework
         // case _ if expr.isConst =>
@@ -594,8 +602,11 @@ object Z3Solver {
           // These don't contain FuncDecl objects, so querying their decl kind
           // would result in a z3 exception.
           if expr.isVar then {
-            val varName: String = boundVarName(expr.getIndex)
+            val boundVarIdx = expr.getIndex
             val sort = liftSort(expr.getSort)
+            // deBruijnStack(i) is the i-th indexed variabl ename.
+            assert(deBruijnStack.size > boundVarIdx)
+            val varName = deBruijnStack(boundVarIdx)
             Core.mkVar(varName, sort)
           } else {
             // Now we can safely handle the rest.
@@ -603,6 +614,7 @@ object Z3Solver {
             val declKind = decl.getDeclKind
             val domainSorts = decl.getDomain.toList.map(liftSort)
             val rangeSort = liftSort(decl.getRange)
+
             def decodeDeclByKind(): Core.BoxedExpr = {
               declKind match {
                 case Z3_decl_kind.Z3_OP_TRUE =>
@@ -742,7 +754,7 @@ object Z3Solver {
                   unsupported("Err: Z3_OP_ARRAY_EXT unsupported")
                 case Z3_decl_kind.Z3_OP_DT_CONSTRUCTOR =>
                   val constructor = expr.getFuncDecl
-                  liftSort(expr.getSort) match {
+                  rangeSort.sort match {
                     case sortT: Core.DatatypeConstructorSort =>
                       sortT.lookupConstructor(constructor.getName.toString) match {
                         case Some(dtc) =>
@@ -755,8 +767,20 @@ object Z3Solver {
                         case None =>
                           unexpected(s"Err: Z3_OP_DT_CONSTRUCTOR: constructor ${constructor.getName.toString} not found in sort ${sortT}", expr)
                       }
+                    case sortT: Core.FiniteUniverseSort =>
+                      // Z3 implements finite universe sorts as enum sorts (datatypes with nullary constructors)
+                      // Constructor names have the pattern: elt_<index>_fd_<sortName>
+                      val constructorName = constructor.getName.toString
+                      val pattern = raw"elt_(\d+)_fd_.*".r
+                      constructorName match {
+                        case pattern(indexStr) =>
+                          val index = indexStr.toInt
+                          Core.mkConst(Core.SortValue.FiniteUniverseValue(index, sortT))
+                        case _ =>
+                          unexpected(s"Err: Z3_OP_DT_CONSTRUCTOR: finite universe constructor name '${constructorName}' does not match expected pattern", expr)
+                      }
                     case _ =>
-                      unexpected(s"Err: Z3_OP_DT_CONSTRUCTOR but ${constructor.toString} has non-datatype constructor sort", expr)
+                      unexpected(s"Err: Z3_OP_DT_CONSTRUCTOR but ${constructor.toString} has sort ${rangeSort} which is neither datatype nor finite universe", expr)
                   }
                 case Z3_decl_kind.Z3_OP_FD_CONSTANT =>
                   unsupported("Z3_OP_FD_CONSTANT reached, but finite-domain sorts are implemented using DatatypeSorts in Z3 now, so unsupported")
@@ -1019,7 +1043,6 @@ object Z3Solver {
 
 
     override def initialize(l: SmtSolver.Logic): Unit = {
-      logic = l
       reset()
     }
 
@@ -1072,7 +1095,7 @@ object Z3Solver {
       try {
         val m = solver.getModel
         if (m == null) None
-        else Some(new Z3Model(m, this, enableCompletion = false))
+        else Some(new Z3Model(m, this, enableCompletion = true))
       } catch {
         case _ =>
           None
@@ -1104,6 +1127,15 @@ object Z3Solver {
       }
     }
 
+    override def formula(vocab: Set[(String, BoxedSort)]): Core.Expr[Core.BoolSort] = {
+      val z3Term = asTerm(vocab)
+      val expr = solver.liftTerm(z3Term)
+      expr.unify(Core.BoolSort()) match {
+        case Some(unifiedExpr) => unifiedExpr
+        case None => failwith(s"Z3Model.formula(V): Expression constructed from model is ${expr}, which does not return a boolean.")
+      }
+    }
+
     override def valueOf[S <: Core.Sort[S]](s: String, sort: S): Option[Core.Expr[S]] = {
       val someExpr = evaluate(Core.mkVar(s, sort))
       someExpr.unify(sort) match {
@@ -1130,53 +1162,53 @@ object Z3Solver {
       val context = solver.getContext
 
       val constDecls = model.getConstDecls.toList
-      val envBindings = solver.getInterp.toList
 
       val declEqualities: List[z3.Expr[z3.Sort]] =
         constDecls.map { decl =>
           context.mkEq(decl.apply(), model.getConstInterp(decl)).asInstanceOf[z3.Expr[z3.Sort]]
         }
 
-      val envEqualities: List[z3.Expr[z3.BoolSort]] =
-        envBindings.flatMap { case (name, boxedExpr) =>
-          val sort = boxedExpr.sort
-          val coreVar = Core.mkVar(name, sort)
-          val valueExpr = evaluate(coreVar)
-          valueExpr.unify(sort) match {
-            case Some(unifiedValue) =>
-              val equality = Core.mkEq(coreVar, unifiedValue)
-              Some(solver.lower(equality).asInstanceOf[z3.Expr[z3.BoolSort]])
-            case None =>
-              None
-          }
-        }
-
-      val equalities = (declEqualities ++ envEqualities)
-
       val conjunct =
-        equalities match {
+        declEqualities match {
           case Nil => context.mkTrue()
           case head :: tail =>
-            context.mkAnd(equalities.map(x => x.asInstanceOf[z3.Expr[z3.BoolSort]]).toArray*)
+            context.mkAnd(declEqualities.map(x => x.asInstanceOf[z3.Expr[z3.BoolSort]]).toArray *)
         }
 
       context.mkNot(conjunct).asInstanceOf[z3.Expr[z3.Sort]]
     }
 
-    // TODO: vocabulary should really be a bag or a set, for better efficiency.
-    override def asTerm(vocabulary: List[String]): this.solver.LoweredTerm = {
-      val constDecls = model.getConstDecls.toList.filter(
-        x => vocabulary.contains(x.getName.toString)
-      )
+    override def asNegatedTerm(vocab: Set[(String, BoxedSort)]): this.solver.LoweredTerm = {
+      val context = solver.getContext
+
+      val declEqualities: List[z3.BoolExpr] =
+        vocab.map { case (name, sort) =>
+          val c = context.mkConst(name, solver.lowerSort(sort))
+          context.mkEq(c, model.evaluate(c, enableCompletion))
+        }.toList
+
+      val conjunct =
+        declEqualities match {
+          case Nil => context.mkTrue()
+          case _ => context.mkAnd(declEqualities.toArray*)
+        }
+      context.mkNot(conjunct).asInstanceOf[z3.Expr[z3.Sort]]
+    }
+
+    override def asTerm(vocabulary: Set[(String, BoxedSort)]): this.solver.LoweredTerm = {
+      val ctx = solver.getContext
       val equalities =
-        solver.getContext.mkAnd(constDecls.map(
-          x =>
-            (solver.getContext.mkEq(x.apply(), model.getConstInterp(x)))
-        ).toArray *)
+        ctx.mkAnd(
+          vocabulary.toList.map(x =>
+            val c = ctx.mkConst(x._1, solver.lowerSort(x._2))
+            val rhs = model.evaluate(c, enableCompletion)
+            ctx.mkEq(c, rhs)
+          ).toArray *
+        )
       equalities.asInstanceOf[z3.Expr[z3.Sort]]
     }
 
-    def asTerm(): solver.LoweredTerm = {
+    override def asTerm(): solver.LoweredTerm = {
       val constDecls = model.getConstDecls.toList
       val equalities =
         solver.getContext.mkAnd(constDecls.map(
@@ -1190,6 +1222,11 @@ object Z3Solver {
 
     override def toString: String = {
       "Z3 Model {" + this.model.toString + "}"
+    }
+
+    override def apply(arg: String, sort: BoxedSort): Option[BoxedExpr] = {
+      val c = solver.getContext.mkConst(arg, solver.lowerSort(sort))
+      Some(solver.liftTerm(model.evaluate(c, enableCompletion)))
     }
   }
 }

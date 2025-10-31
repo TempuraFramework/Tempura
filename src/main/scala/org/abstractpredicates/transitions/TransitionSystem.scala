@@ -6,7 +6,7 @@ import org.abstractpredicates.expression.Core.{BoolSort, InterpEnv, TypeEnv}
 import org.abstractpredicates.smt.SmtSolver.*
 import org.abstractpredicates.helpers.Utils.*
 
-class TransitionSystem(val stateVars: List[TimedVariable],
+class TransitionSystem(val stateVars: Set[TimedVariable],
                        val init: Core.Expr[BoolSort], // formula over state variables
                        val trans: Core.Expr[BoolSort], // formula over state variables, next-state variables, and internal (transition) variables.
                        val assertions: List[Core.Expr[BoolSort]],
@@ -32,5 +32,5 @@ class TransitionSystem(val stateVars: List[TimedVariable],
   def getSorts: List[Core.BoxedSort] = this.typeEnv.toList.map(x => x._2)
   def getSortNames: List[String] = this.typeEnv.toList.map(x => x._1)
   def getVars: List[(String, Core.BoxedExpr)] = this.interpEnv.toList
-  def getStateVars: List[TimedVariable] = this.stateVars
+  def getStateVars: Set[TimedVariable] = this.stateVars
 }

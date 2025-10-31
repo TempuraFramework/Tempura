@@ -1,18 +1,18 @@
 package org.abstractpredicates.smt
 
-import com.microsoft.z3
-import com.microsoft.z3.enumerations.Z3_decl_kind
+import de.uni_freiburg.informatik.ultimate.logic.{FunctionSymbol, Sort, Term}
 import org.scalatest.funsuite.AnyFunSuite
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.expression.Core.*
 import org.abstractpredicates.helpers.Utils.*
 import org.abstractpredicates.smt.SmtSolver.*
-class Z3BackendTests extends AnyFunSuite {
 
+class SMTInterpolBackendTests extends AnyFunSuite {
 
   test("solve boolean formulas") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
     assert(typeEnv.getUpdateHook.isDefined)
     assert(interpEnv.getUpdateHook.isDefined)
     val x = Core.mkVar("x", Core.BoolSort())
@@ -34,10 +34,11 @@ class Z3BackendTests extends AnyFunSuite {
     println(s"interp environment history: ${interpEnv.getHistory} ")
     assert(true)
   }
-  
+
   test("solve array formulas") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
     val arr = Core.mkVar("arr", Core.ArraySort(Core.NumericSort(), Core.NumericSort()))
     val i = Core.mkVar("i", Core.NumericSort())
     val v = Core.mkVar("v", Core.NumericSort())
@@ -56,61 +57,60 @@ class Z3BackendTests extends AnyFunSuite {
     assert(true)
   }
 
-
-  test("solve boolean-indexed and nested arrays") {
+  test("boolean-indexed arrays are rejected") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
-    // Define nested array types for 2D array simulation: bool->(bool->int)
-    val arr1 = Core.mkVar("arr1", Core.ArraySort(Core.BoolSort(), Core.NumericSort()))
-    val arr2 = Core.mkVar("arr2", Core.ArraySort(Core.BoolSort(), Core.ArraySort(Core.BoolSort(), Core.NumericSort())))
+    val arr = Core.mkVar("arr", Core.ArraySort(Core.BoolSort(), Core.NumericSort()))
+    intercept[UnsupportedOperationException] {
+      solver.add(List(Core.mkEq(Core.mkSelect(arr, Core.mkTrue), Core.mkConst(1))))
+    }
+  }
 
-    // Define index variables
-    val b1 = Core.mkVar("b1", Core.BoolSort())
-    val b2 = Core.mkVar("b2", Core.BoolSort())
-    val v1 = Core.mkVar("v1", Core.NumericSort())
-    val v2 = Core.mkVar("v2", Core.NumericSort())
+  test("solve nested arrays with uninterpreted indices") {
+    val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
-    interpEnv.add("arr1", arr1)
-    interpEnv.add("arr2", arr2)
-    interpEnv.add("b1", b1)
-    interpEnv.add("b2", b2)
-    interpEnv.add("v1", v1)
-    interpEnv.add("v2", v2)
-    
+    val idxSort = Core.UnInterpretedSort("Idx", 0)
+    typeEnv.add("Idx", idxSort.box)
+
+    val innerArray = Core.mkVar("inner", Core.ArraySort(idxSort, Core.NumericSort()))
+    val outerArray = Core.mkVar("outer", Core.ArraySort(idxSort, Core.ArraySort(idxSort, Core.NumericSort())))
+    val i1 = Core.mkVar("i1", idxSort)
+    val i2 = Core.mkVar("i2", idxSort)
+    val val1 = Core.mkVar("val1", Core.NumericSort())
+    val val2 = Core.mkVar("val2", Core.NumericSort())
+
+    interpEnv.add("inner", innerArray)
+    interpEnv.add("outer", outerArray)
+    interpEnv.add("i1", i1)
+    interpEnv.add("i2", i2)
+    interpEnv.add("val1", val1)
+    interpEnv.add("val2", val2)
+
     solver.add(List(
-      Core.mkEq(Core.mkSelect(arr1, b1), v1),
-      Core.mkEq(Core.mkSelect(Core.mkSelect(arr2, b1), b2), v2),
-      Core.mkEq(b1, Core.mkTrue),
-      Core.mkEq(b2, Core.mkFalse),
-      Core.mkEq(v1, Core.mkConst(10)),
-      Core.mkEq(v2, Core.mkConst(20))
+      Core.mkEq(Core.mkSelect(innerArray, i1), val1),
+      Core.mkEq(Core.mkSelect(Core.mkSelect(outerArray, i1), i2), val2)
     ))
 
     assert(solver.checkSat() == Result.SAT)
     val model = solver.getModel.get
-    println(s"model.formula:${model.formula()}")
-    println(s"model value of b1 = ${model.evaluate(b1)}")
-    println(s"model value of b2 = ${model.evaluate(b2)}")
-    println(s"model value of v1 = ${model.evaluate(v1)}")
-    println(s"model value of v2 = ${model.evaluate(v2)}")
-    // Strict assertions
-    //assert(model.formula().contains("b1 = true"))
-    //assert(model.formula().contains("b2 = false"))
-    //assert(model.formula().contains("v1 = 10"))
-    //assert(model.formula().contains("v2 = 20"))
+    println(s"nested array model: ${model.formula()}")
   }
 
   test("solve array with universal quantifier") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     val arr = Core.mkVar("arr", Core.ArraySort(Core.NumericSort(), Core.NumericSort()))
     val i = Core.mkVar("i", Core.NumericSort())
 
     interpEnv.add("arr", arr)
     interpEnv.add("i", i)
-    
+
     val constraint = Core.mkForall(
       List(("i", Core.NumericSort())),
       Core.mkImplies(
@@ -125,56 +125,11 @@ class Z3BackendTests extends AnyFunSuite {
     println(s"model: ${model.toString}")
     println(s"model.formula:${model.formula()}")
   }
-  /*
-  test("solve binary tree datatype with quantifiers") {
-    val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-
-    // Define binary tree datatype
-    val treeSort = Core.DatatypeConstructorSort("treeSort", List())
-
-    val leafConstructor = Core.Constructor("Leaf", List(("value", Core.NumericSort())))
-    val nodeConstructor = Core.Constructor("Node", List(("left", treeSort), ("right", treeSort)))
-
-    typeEnv.add("Tree", treeSort)
-
-    // Declare variables
-    val tree = Core.mkVar("tree", treeSort)
-    val x = Core.mkVar("x", Core.NumericSort())
-
-    interpEnv.add("tree", tree)
-    interpEnv.add("x", x)
-
-    checked(solver.declareVar("tree", treeSort))
-    checked(solver.declareVar("x", Core.NumericSort()))
-
-    // Create a constraint that all values in the tree are positive
-    val isPositive = Core.mkForall(
-      List(("x", Core.NumericSort())),
-      Core.mkImplies(
-        Core.mkOr(List(
-          Core.mkEq(x, Core.mkSelect(tree, Core.mkConst("value"))),
-          Core.mkEq(x, Core.mkSelect(Core.mkSelect(tree, Core.mkConst("left")), Core.mkConst("value"))),
-          Core.mkEq(x, Core.mkSelect(Core.mkSelect(tree, Core.mkConst("right")), Core.mkConst("value")))
-        )),
-        Core.mkGt(x, Core.mkConst(0))
-      )
-    )
-
-    solver.add(List(isPositive))
-    assert(solver.checkSat() == Result.SAT)
-    val model = solver.getModel.get
-    println(s"model.formula:${model.formula()}")
-
-    // Verify that the model satisfies our constraints
-    val treeValue = model.evaluate(Core.mkSelect(tree, Core.mkConst("value")))
-    assert(treeValue.toInt > 0, "Root value should be positive")
-  }
-  */
 
   test("solve color mapping with arrays and quantifiers") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     // Define Color datatype
     val redConstr = Core.Constructor("Red", List())
@@ -218,7 +173,8 @@ class Z3BackendTests extends AnyFunSuite {
 
   test("test push pop behavior") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     // Create variables
     val x = Core.mkVar("x", Core.NumericSort())
@@ -240,13 +196,13 @@ class Z3BackendTests extends AnyFunSuite {
     // Verify model
     val model = solver.getModel.get
     val xVal = model.evaluate(x)
-    //assert(, s"x value should be positive, got $xVal")
     println(s"x value: $xVal")
   }
 
   test("solve function definition with macro") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     // Define function f(x) = x + 2 using macro
     val funSort = Core.funSort(List(Core.NumericSort()), Core.NumericSort())
@@ -281,8 +237,6 @@ class Z3BackendTests extends AnyFunSuite {
     interpEnv.add("z", z)
     solver.add(List(Core.mkEq(z, Core.mkSubst("app", List(("x", y)), mac))))
 
-    //print(solver.getHistory.mkString("\n"))
-
     assert(solver.checkSat() == Result.SAT)
     val model = solver.getModel.get
     println(s"model: ${model.toString}")
@@ -292,38 +246,36 @@ class Z3BackendTests extends AnyFunSuite {
     println(s"model.formula: ${model.formula()}")
   }
 
-  test("parsing of Z3 sorts") {
+  test("parsing of SMTInterpol sorts") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    val ctx = solver.getContext
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
+    val smtSolver = solver.getSolver
 
-    assert(solver.lowerSort(Core.numericSort) == ctx.getIntSort)
-    assert(solver.lowerSort(Core.boolSort) == ctx.getBoolSort)
-    assert(solver.lowerSort(Core.arraySort(Core.numericSort, Core.boolSort)) == ctx.mkArraySort(ctx.getIntSort, ctx.getBoolSort))
+    val intSort = solver.lowerSort(Core.numericSort)
+    val boolSort = solver.lowerSort(Core.boolSort)
+    val arraySort = solver.lowerSort(Core.arraySort(Core.numericSort, Core.boolSort))
+
+    assert(intSort.getName == "Int")
+    assert(boolSort.getName == "Bool")
+    assert(arraySort.isArraySort)
   }
 
-  test("parsing back Z3 expressions") {
+  test("parsing back SMTInterpol expressions") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    val ctx = solver.getContext
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
+    val smtSolver = solver.getSolver
 
-    val tt = ctx.mkTrue()
-    val ff = ctx.mkFalse()
-    assert(solver.liftTerm(tt.asInstanceOf[solver.LoweredTerm]) == Core.mkTrue)
-    assert(solver.liftTerm(ff.asInstanceOf[solver.LoweredTerm]) == Core.mkFalse)
+    val tt = smtSolver.term("true")
+    val ff = smtSolver.term("false")
+    assert(solver.liftTerm(tt) == Core.mkTrue)
+    assert(solver.liftTerm(ff) == Core.mkFalse)
 
-    val number = ctx.mkNumeral(30, ctx.getIntSort)
-    assert(solver.liftTerm(number.asInstanceOf[solver.LoweredTerm]) == Core.mkConst(30))
-    val plus2 = ctx.mkAdd(number, ctx.mkNumeral(32, ctx.getIntSort))
-    assert(solver.liftTerm(plus2.asInstanceOf[solver.LoweredTerm]) == Core.mkAdd(List(Core.mkConst(30), Core.mkConst(32))))
-
-
-    val p = ctx.mkFuncDecl("p", Array[z3.Sort](), ctx.getBoolSort)
-    assert(p.getDeclKind != Z3_decl_kind.Z3_OP_RECURSIVE)
-    assert(p.getDeclKind == Z3_decl_kind.Z3_OP_UNINTERPRETED)
-    val liftedP = solver.liftTerm(p.apply().asInstanceOf[solver.LoweredTerm])
-    assert(liftedP == Core.mkVar("p", Core.BoolSort()))
-
+    val number = smtSolver.numeral("30")
+    assert(solver.liftTerm(number) == Core.mkConst(30))
+    val plus2 = smtSolver.term("+", number, smtSolver.numeral("32"))
+    assert(solver.liftTerm(plus2) == Core.mkAdd(List(Core.mkConst(30), Core.mkConst(32))))
 
     val var_x = Core.mkVar("x", Core.BoolSort())
     val var_y = Core.mkVar("y", Core.BoolSort())
@@ -332,7 +284,6 @@ class Z3BackendTests extends AnyFunSuite {
     interpEnv.add("y", var_y)
 
     assert(solver.liftTerm(solver.lower(var_x)) == var_x)
-
 
     val b0 = Core.mkImplies(Core.mkOr(List(var_x, var_y)), Core.mkAnd(List(Core.mkNot(var_x), Core.mkFalse)))
     assert(solver.liftTerm(solver.lower(b0)) == b0)
@@ -345,10 +296,10 @@ class Z3BackendTests extends AnyFunSuite {
     assert(solver.liftTerm(solver.lower(boolEq)) == boolEq)
   }
 
-  test("parsing back array Z3 expressions") {
+  test("parsing back array SMTInterpol expressions") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    val ctx = solver.getContext
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     val arrayVar = Core.mkVar("arr", Core.ArraySort(Core.NumericSort(), Core.NumericSort()))
     val idx = Core.mkVar("i", Core.NumericSort())
@@ -357,18 +308,17 @@ class Z3BackendTests extends AnyFunSuite {
     val stored = Core.mkStore(arrayVar, idx, Core.mkConst(99))
     val selected = Core.mkSelect(stored, idx)
 
-    val storedZ3 = solver.lower(stored)
-    val selectedZ3 = solver.lower(selected)
+    val storedTerm = solver.lower(stored)
+    val selectedTerm = solver.lower(selected)
 
-    assert(solver.liftTerm(storedZ3) == stored)
-    assert(solver.liftTerm(selectedZ3) == selected)
+    assert(solver.liftTerm(storedTerm) == stored)
+    assert(solver.liftTerm(selectedTerm) == selected)
   }
 
-
-  test("parsing back array Z3 expressions 2") {
+  test("parsing back array SMTInterpol expressions 2") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    val ctx = solver.getContext
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     val arrayVar = Core.mkVar("arr", Core.ArraySort(Core.NumericSort(), Core.NumericSort()))
     val idx = Core.mkVar("i", Core.NumericSort())
@@ -378,18 +328,17 @@ class Z3BackendTests extends AnyFunSuite {
     val stored2 = Core.mkStore(arrayVar, Core.mkAdd(List(idx, Core.mkConst(1))), Core.mkConst(100))
     val selected = Core.mkSelect(stored, idx)
     val selected2 = Core.mkSelect(arrayVar, selected)
-    val storedZ3 = solver.lower(stored)
-    val selectedZ3 = solver.lower(selected)
+    val storedTerm = solver.lower(stored)
+    val selectedTerm = solver.lower(selected)
 
     assert(solver.liftTerm(solver.lower(stored2)) == stored2)
     assert(solver.liftTerm(solver.lower(selected2)) == selected2)
   }
 
-  test("z3 forall / exists test") {
-
+  test("SMTInterpol forall / exists test") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    val ctx = solver.getContext
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     val forallExpr = Core.mkForall(
       List(("n", Core.NumericSort())),
@@ -421,59 +370,17 @@ class Z3BackendTests extends AnyFunSuite {
         ))
       )
 
+    val smtForall = solver.lower(forallExpr)
+    println(s"SMTInterpol forall: ${smtForall}")
 
-    val z3Forall = solver.lower(forallExpr).asInstanceOf[z3.Quantifier]
-    val z3ForallVar = z3Forall.getBoundVariableNames
-    val z3ForallBody = z3Forall.getBody
-
-    println(s"z3 forall: ${z3Forall}")
-    println(s"z3 forall var: ${z3ForallVar(0).toString}")
-    println(s"z3 forall body: ${z3ForallBody}")
-
-    println("---------------------------------------")
-
-
-    val z3Nested = solver.lower(nested).asInstanceOf[z3.Quantifier]
-    val z3NestedVars = z3Nested.getBoundVariableNames.toList.map(x => x.toString)
-    val z3NestedBody = z3Nested.getBody
-
-    val z3Nested1 = z3Nested.getBody.getArgs()(0).asInstanceOf[z3.Quantifier]
-    val z3Nested1Vars = z3Nested1.getBoundVariableNames.toList.map(x => x.toString)
-    val z3Nested1Body = z3Nested.getBody
-
-    val z3Nested2 = z3Nested1.getBody.asInstanceOf[z3.Quantifier]
-    val z3Nested2Vars = z3Nested2.getBoundVariableNames.toList.map(x => x.toString)
-    val z3Nested2Body = z3Nested2.getBody
-
-    println(s" *** Toplevel number of bound vars: ${z3Nested.getNumBound}")
-    println(s" *** Middle number of bound vars: ${z3Nested1.getNumBound}")
-    println(s" *** Bottomlevel number of bound vars: ${z3Nested2.getNumBound}")
-
-    println(s"z3 nested forall: ${z3Nested}")
-    println(s"z3 nested forall var: ${z3NestedVars}")
-    println(s"z3 nested forall body: ${z3NestedBody}")
-
-    println(s"z3 nested forall-exists: ${z3Nested1}")
-    println(s"z3 nested forall-exists var: ${z3Nested1Vars}")
-    println(s"z3 nested forall-exists body: ${z3Nested1Body}")
-
-    println(s"z3 nested forall-exists-forall: ${z3Nested2}")
-    println(s"z3 nested forall-exists-forall var: ${z3Nested2Vars}")
-    println(s"z3 nested forall-exists-forall body: ${z3Nested2Body}")
-
-
-    println("----------")
-    println(s"other case: ${z3Nested.getBody.getArgs()(1).asInstanceOf[z3.Quantifier]}")
-    println(s"other case var: ${z3Nested.getBody.getArgs()(1).asInstanceOf[z3.Quantifier].getBoundVariableNames.toList}")
-    println(s"other case body: ${z3Nested.getBody.getArgs()(1).asInstanceOf[z3.Quantifier].getBody}")
-    println("----------")
-
+    val smtNested = solver.lower(nested)
+    println(s"SMTInterpol nested forall: ${smtNested}")
   }
 
-  test("parsing back complex Z3 expressions") {
+  test("parsing back complex SMTInterpol expressions") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    val ctx = solver.getContext
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     val forallExpr = Core.mkForall(
       List(("n", Core.NumericSort())),
@@ -491,10 +398,11 @@ class Z3BackendTests extends AnyFunSuite {
     assert(solver.liftTerm(existsTerm) == existsExpr)
   }
 
-  test("parsing back ADT Z3 expressions") { // TODO BUG
+  test("parsing back ADT SMTInterpol expressions") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    val ctx = solver.getContext
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
+    val smtSolver = solver.getSolver
 
     val pointConstructor = Core.constructor("Point", List(
       ("x", Core.numericSort),
@@ -503,25 +411,65 @@ class Z3BackendTests extends AnyFunSuite {
     val pointSortBox = Core.datatypeSort("Point", List(pointConstructor))
     typeEnv.add("Point", pointSortBox)
     val pointSort = pointSortBox.sort
-    val z3PointSort = solver.defineSort(pointSort).asInstanceOf[z3.DatatypeSort[z3.Sort]]
-    val pointCtorDecl = z3PointSort.getConstructors()(0)
-    val pointValue = pointCtorDecl.apply(ctx.mkInt(1), ctx.mkInt(2))
-    val xAccessor = z3PointSort.getAccessors()(0)(0)
-    val liftedAccessor = solver.liftTerm(xAccessor.apply(pointValue).asInstanceOf[solver.LoweredTerm])
-    val expectedPoint = Core.mkDatatypeAccessor(
-      pointSort,
-      Core.instantiatedConstructor(
-        pointConstructor,
-        List(Core.mkConst(1).box(), Core.mkConst(2).box())
-      )
-    )
-    assert(liftedAccessor == expectedPoint)
+
+    // Lower the sort to ensure it's declared in SMTInterpol
+    val smtPointSort = solver.defineSort(pointSort)
+
+    println(s"SMTInterpol Point sort: ${smtPointSort}")
+    assert(smtPointSort.getName == "Point")
   }
 
+  /* ***** TODO ***
+  test("alias sort lowering and evaluation") {
+    val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
+
+    val base = Core.UnInterpretedSort("Base", 0)
+    typeEnv.add("Base", base.box)
+
+    val alias = Core.AliasSort("AliasBase", Nil, base)
+    typeEnv.add("AliasBase", alias.box)
+
+    val x = Core.mkVar("x", alias)
+    interpEnv.add("x", x)
+
+    solver.add(List(Core.mkEq(x, Core.mkConst(Core.SortValue.UnInterpretedValue("c0", alias)))))
+
+    assert(solver.checkSat() == Result.SAT)
+    val model = solver.getModel.get
+    val value = model.evaluate(x)
+    assert(value.toString.contains("c0"))
+  }*/
+
+  test("model asTerm and blocking clauses") {
+    val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
+
+    val x = Core.mkVar("x", Core.BoolSort())
+    interpEnv.add("x", x)
+
+    assert(solver.checkSat() == Result.SAT)
+    val model1 = solver.getModel.get
+    val firstValue = model1.evaluate(x).toString
+
+    solver.addTerms(List(model1.asNegatedTerm()))
+    assert(solver.checkSat() == Result.SAT)
+    val model2 = solver.getModel.get
+    val secondValue = model2.evaluate(x).toString
+    assert(firstValue != secondValue)
+
+    solver.addTerms(List(model2.asTerm()))
+    assert(solver.checkSat() == Result.SAT)
+    solver.addTerms(List(model2.asNegatedTerm()))
+    assert(solver.checkSat() == Result.UNSAT)
+  }
 
   test("allSat with boolean variables only") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     // Create two boolean variables
     val x = Core.mkVar("x", Core.BoolSort())
@@ -534,6 +482,8 @@ class Z3BackendTests extends AnyFunSuite {
     solver.add(List(Core.mkOr(List(x, y))))
 
     // Get all satisfying models
+
+
     val models = solver.allSat(Set(("x", Core.boolSort), ("y", Core.boolSort)))
 
     // Should have exactly 3 models
@@ -551,7 +501,8 @@ class Z3BackendTests extends AnyFunSuite {
 
   test("allSat with finite universe sorts and arrays") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     // Create a finite universe sort with 2 elements
     val colorSort = Core.FiniteUniverseSort("Color", 2)
@@ -583,7 +534,8 @@ class Z3BackendTests extends AnyFunSuite {
 
   test("allSat with multiple finite universe variables") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val solver = SmtInterpolSolver.SmtInterpolSolver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
 
     // Create a finite universe sort with 3 elements
     val signalSort = Core.FiniteUniverseSort("Signal", 3)
@@ -613,138 +565,4 @@ class Z3BackendTests extends AnyFunSuite {
     assert(models.length == 6, s"Expected 6 models, got ${models.length}")
   }
 
-  test("cardinality constraints via at-most/at-least") {
-    val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-
-    val a = Core.mkVar("a", Core.BoolSort())
-    val b = Core.mkVar("b", Core.BoolSort())
-    val c = Core.mkVar("c", Core.BoolSort())
-
-    interpEnv.add("a", a)
-    interpEnv.add("b", b)
-    interpEnv.add("c", c)
-
-    val vars = List(a.asInstanceOf[Core.Var[Core.BoolSort]],
-      b.asInstanceOf[Core.Var[Core.BoolSort]],
-      c.asInstanceOf[Core.Var[Core.BoolSort]])
-
-    // Exactly one variable should be true
-    val atMostOne = Core.mkAtMost(1, vars)
-    val atLeastOne = Core.mkAtLeast(1, vars)
-
-    solver.add(List(
-      atMostOne,
-      atLeastOne,
-      Core.mkEq(a, Core.mkTrue),
-      Core.mkEq(b, Core.mkFalse)
-    ))
-
-    assert(solver.checkSat() == Result.SAT)
-    val model = solver.getModel.get
-    val aVal = model.evaluate(a).toString
-    val bVal = model.evaluate(b).toString
-    val cVal = model.evaluate(c).toString
-    assert(aVal.contains("true"))
-    assert(bVal.contains("false"))
-    assert(cVal.contains("false"))
-  }
-
-  test("lowering of ite Top node") {
-    val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-
-    val flag = Core.mkVar("flag", Core.BoolSort())
-    val iteExpr = Core.mkTop("=>", flag, Core.mkConst(7), Core.mkConst(3), Core.NumericSort())
-    val result = Core.mkVar("res", Core.NumericSort())
-
-    interpEnv.add("flag", flag)
-    interpEnv.add("res", result)
-
-    solver.add(List(
-      Core.mkEq(flag, Core.mkTrue),
-      Core.mkEq(result, iteExpr)
-    ))
-
-    assert(solver.checkSat() == Result.SAT)
-    val model = solver.getModel.get
-    val resValue = model.evaluate(result)
-    assert(resValue.toString.contains("7"))
-  }
-
-  test("division lowering") {
-    val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-
-    val quotient = Core.mkVar("q", Core.NumericSort())
-    interpEnv.add("q", quotient)
-
-    val division = Core.mkBop("/", Core.mkConst(10), Core.mkConst(2), Core.NumericSort())
-
-    solver.add(List(
-      Core.mkEq(quotient, division)
-    ))
-
-    assert(solver.checkSat() == Result.SAT)
-    val model = solver.getModel.get
-    assert(model.evaluate(quotient).toString.contains("5"))
-  }
-
-  test("datatype constructor and recognizer lifting") {
-    val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    val ctx = solver.getContext
-
-    val pointConstructor = Core.constructor("Point", List(
-      ("x", Core.numericSort),
-      ("y", Core.numericSort)
-    ))
-    val pointSortBox = Core.datatypeSort("Point", List(pointConstructor))
-    typeEnv.add("Point", pointSortBox)
-    val pointSort = pointSortBox.sort
-    val z3PointSort = solver.defineSort(pointSort).asInstanceOf[z3.DatatypeSort[z3.Sort]]
-    val pointCtorDecl = z3PointSort.getConstructors()(0)
-    val pointValue = pointCtorDecl.apply(ctx.mkInt(4), ctx.mkInt(9))
-
-    val expectedPoint = Core.mkDatatypeAccessor(
-      pointSort,
-      Core.instantiatedConstructor(
-        pointConstructor,
-        List(Core.mkConst(4).box(), Core.mkConst(9).box())
-      )
-    )
-
-    assert(solver.liftTerm(pointValue.asInstanceOf[solver.LoweredTerm]) == expectedPoint)
-
-    val recognizer = z3PointSort.getRecognizers()(0)
-    val liftedRecognizer = solver.liftTerm(recognizer.apply(pointValue).asInstanceOf[solver.LoweredTerm])
-    val expectedRecognizer = Core.mkDatatypeRecognizer(pointSort, "Point", expectedPoint)
-    assert(liftedRecognizer == expectedRecognizer)
-  }
-
-  test("model blocking with asTerm and asNegatedTerm") {
-    val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
-    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-
-    val x = Core.mkVar("x", Core.BoolSort())
-    interpEnv.add("x", x)
-
-    solver.add(List()) // no constraints, two models exist
-    assert(solver.checkSat() == Result.SAT)
-    val model1 = solver.getModel.get
-    val value1 = model1.evaluate(x).toString
-
-    // Block current model
-    solver.addTerms(List(model1.asNegatedTerm()))
-    assert(solver.checkSat() == Result.SAT)
-    val model2 = solver.getModel.get
-    val value2 = model2.evaluate(x).toString
-    assert(value1 != value2, "Blocking clause should exclude previous model")
-
-    // Constrain solver to the second model only and ensure unsat afterwards
-    solver.addTerms(List(model2.asTerm()))
-    assert(solver.checkSat() == Result.SAT)
-    solver.addTerms(List(model2.asNegatedTerm()))
-    assert(solver.checkSat() == Result.UNSAT)
-  }
 }

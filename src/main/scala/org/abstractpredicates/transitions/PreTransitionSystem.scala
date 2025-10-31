@@ -78,7 +78,7 @@ class PreTransitionSystem {
 
   def toTransitionSystem: Option[TransitionSystem] =
     (init, trans).tupled.map(x =>
-      new TransitionSystem(stateVars, x._1, x._2, assertions, assumptions, liveAssertions, liveAssumptions, fairness, typeEnv, interpEnv))
+      new TransitionSystem(stateVars.to(Set), x._1, x._2, assertions, assumptions, liveAssertions, liveAssumptions, fairness, typeEnv, interpEnv))
 
   // destroy any recorded state and reset to initial state.
   def clear(): Unit =

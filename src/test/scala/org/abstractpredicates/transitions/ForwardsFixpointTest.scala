@@ -4,7 +4,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.helpers.Utils.*
 import org.abstractpredicates.smt.SmtSolver.*
-import org.abstractpredicates.smt.Z3Solver
+import org.abstractpredicates.smt.{SmtSolver, Z3Solver}
 
 /**
  * Test suite for ForwardsFixpoint explicit-state model checker.
@@ -16,7 +16,7 @@ import org.abstractpredicates.smt.Z3Solver
  * - Reachability analysis
  */
 class ForwardsFixpointTest extends AnyFunSuite {
-/*
+
   /**
    * Helper: Create a simple two-state boolean transition system
    *
@@ -27,7 +27,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
    * This should produce exactly 2 states: {x=false} and {x=true}
    * with edges forming a cycle.
    */
-  def createToggleSystem(): (TransitionSystem, Z3Solver.Z3Solver) = {
+  def createToggleSystem(): (TransitionSystem, SmtSolver.SolverEnvironment) = {
     val typeEnv = Core.emptyTypeEnv
     val interpEnv = Core.emptyInterpEnv
 
@@ -40,7 +40,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val trans = Core.mkEq(next_x, Core.mkNot(x))
 
     val trs = TransitionSystem(
-      stateVars = List(timedVar),
+      stateVars = Set(timedVar),
       init = init,
       trans = trans,
       assertions = List(),
@@ -53,8 +53,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     )
 
     val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-
-    (trs, solver)
+    (trs, solver.box)
   }
 
   /**
@@ -68,7 +67,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
    *
    * States: 00 -> 10 -> 01 -> 11 -> 00 (cycle of length 4)
    */
-  def createCounterSystem(): (TransitionSystem, Z3Solver.Z3Solver) = {
+  def createCounterSystem(): (TransitionSystem, SmtSolver.SolverEnvironment) = {
     val typeEnv = Core.emptyTypeEnv
     val interpEnv = Core.emptyInterpEnv
 
@@ -97,7 +96,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     ))
 
     val trs = TransitionSystem(
-      stateVars = List(timedVar0, timedVar1),
+      stateVars = Set(timedVar0, timedVar1),
       init = init,
       trans = trans,
       assertions = List(),
@@ -111,7 +110,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
     val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
 
-    (trs, solver)
+    (trs, solver.box)
   }
 
   /**
@@ -152,7 +151,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     ))
 
     val trs = TransitionSystem(
-      stateVars = List(timedVar0, timedVar1),
+      stateVars = Set(timedVar0, timedVar1),
       init = init,
       trans = trans,
       assertions = List(),
@@ -210,7 +209,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
   test("mutex system: invariant holds") {
     val (trs, solver, mutexProperty) = createMutexSystem()
-    val fixpoint = ForwardsFixpoint[Z3Solver.Z3Solver](trs, solver, List())
+    val fixpoint = ForwardsFixpoint(trs, solver, List())
 
     fixpoint.setMaxSteps(20)
     fixpoint.run()
@@ -223,7 +222,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
   test("mutex system: reachable states") {
     val (trs, solver, _) = createMutexSystem()
-    val fixpoint = ForwardsFixpoint[Z3Solver.Z3Solver](trs, solver, List())
+    val fixpoint = ForwardsFixpoint(trs, solver, List())
 
     fixpoint.setMaxSteps(20)
     val graph = fixpoint.run()
@@ -239,7 +238,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
   test("toggle system: initial states computation") {
     val (trs, solver) = createToggleSystem()
-    val fixpoint = ForwardsFixpoint[Z3Solver.Z3Solver](trs, solver, List())
+    val fixpoint = ForwardsFixpoint(trs, solver, List())
 
     fixpoint.initialize()
     val initStates = fixpoint.computeInitialStates()
@@ -250,7 +249,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
   test("counter system: initial states computation") {
     val (trs, solver) = createCounterSystem()
-    val fixpoint = ForwardsFixpoint[Z3Solver.Z3Solver](trs, solver, List())
+    val fixpoint = ForwardsFixpoint(trs, solver, List())
 
     fixpoint.initialize()
     val initStates = fixpoint.computeInitialStates()
@@ -261,7 +260,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
   test("toggle system: step-by-step exploration") {
     val (trs, solver) = createToggleSystem()
-    val fixpoint = ForwardsFixpoint[Z3Solver.Z3Solver](trs, solver, List())
+    val fixpoint = ForwardsFixpoint(trs, solver, List())
 
     fixpoint.initialize()
     val initStates = fixpoint.computeInitialStates()
@@ -278,7 +277,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
   test("toggle system: max steps limit") {
     val (trs, solver) = createToggleSystem()
-    val fixpoint = ForwardsFixpoint[Z3Solver.Z3Solver](trs, solver, List())
+    val fixpoint = ForwardsFixpoint(trs, solver, List())
 
     // Set max steps to 0 - should only compute initial states
     fixpoint.setMaxSteps(0)
@@ -302,7 +301,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val trans = Core.mkEq(next_x, Core.mkNot(x))
 
     val trs = TransitionSystem(
-      stateVars = List(timedVar),
+      stateVars = Set(timedVar),
       init = init,
       trans = trans,
       assertions = List(),
@@ -315,7 +314,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     )
 
     val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    val fixpoint = ForwardsFixpoint[Z3Solver.Z3Solver](trs, solver, List())
+    val fixpoint = ForwardsFixpoint(trs, solver.box, List())
 
     fixpoint.setMaxSteps(10)
     fixpoint.run()
@@ -339,7 +338,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val trans = Core.mkEq(next_x, Core.mkNot(x))
 
     val trs = TransitionSystem(
-      stateVars = List(timedVar),
+      stateVars = Set(timedVar),
       init = init,
       trans = trans,
       assertions = List(),
@@ -355,7 +354,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val theoryAxiom = Core.mkNot(x)
 
     val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    val fixpoint = ForwardsFixpoint[Z3Solver.Z3Solver](trs, solver, List(theoryAxiom))
+    val fixpoint = ForwardsFixpoint(trs, solver.box, List(theoryAxiom))
 
     fixpoint.setMaxSteps(10)
     fixpoint.run()
@@ -367,5 +366,5 @@ class ForwardsFixpointTest extends AnyFunSuite {
     // So should have 1 state with 0 successors
     assert(stats.totalStates == 1, s"Expected 1 state, got ${stats.totalStates}")
     assert(stats.totalEdges == 0, s"Expected 0 edges, got ${stats.totalEdges}")
-  }*/
+  }
 }

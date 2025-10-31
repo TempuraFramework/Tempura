@@ -3,6 +3,7 @@ package org.abstractpredicates.abstraction
 import algebra.Eq
 import algebra.ring.Semiring as S
 
+
 trait IdempotentSemiring[T] extends S[T], AbstractDomain[T] {
   
   override def isZero(a: T)(implicit ev: Eq[T]): Boolean = super.isZero(a)

@@ -84,7 +84,7 @@ class ForwardsFixpoint(val trs: TransitionSystem,
   private def computeAllSat(cond: Core.Expr[Core.BoolSort]) = {
     solver.push()
     solver.add(List(cond))
-    val models = solver.allSat()
+    val models = solver.allSat(trs.stateVars.map((x: TimedVariable) => (x.getOriginalName, x.getSort)))
     solver.pop()
     models
   }
@@ -109,8 +109,8 @@ class ForwardsFixpoint(val trs: TransitionSystem,
 
           // Block this model by adding ¬model.formula() and recurse
           val newCond = cond match {
-            case lop: Core.Lop[Core.BoolSort, Core.BoolSort] if lop.name == "and" =>
-              Core.mkAnd(Core.mkNot(model.formula()) :: lop.subExpr)
+            case Core.And(subExpr) =>
+              Core.mkAnd(Core.mkNot(model.formula()) :: subExpr)
             case _ =>
               Core.mkAnd(List(Core.mkNot(model.formula()), cond))
           }
@@ -135,7 +135,7 @@ class ForwardsFixpoint(val trs: TransitionSystem,
    * @return The vertex ID of the state (new or existing)
    */
   private def addStateToGraph(state: State): Int = {
-    val stateFormula = state.summarize
+    val stateFormula = summarizeState(state)
 
     stateCache.get(stateFormula) match {
       case Some(vertexId) =>
@@ -218,39 +218,37 @@ class ForwardsFixpoint(val trs: TransitionSystem,
    * @return A state corresponding to the next-state portion of the model
    */
   private def projectToNextState(model: Model[solverEnv.LoweredTerm, solverEnv.LoweredVarDecl]): State = {
-    // Extract the values of next-state variables from the model
-    // and create a new state formula from them
-
     val stateVarsSet = trs.stateVars.toSet
 
-    // Build a formula representing the successor state by evaluating
-    // next-state variables in the model
-    val nextStateFormula = {
-      val nextStateEqs = trs.stateVars.flatMap { tvar =>
-        val origName = tvar.getOriginalName
+    val nextAssignments = trs.stateVars.toList
+      .sortBy(_.getNextState)
+      .flatMap { tvar =>
         val nextName = tvar.getNextState
+        val origName = tvar.getOriginalName
         val sort = tvar.getSort
 
-        // Get the value of the next-state variable from the model
         model.valueOf(nextName, sort.sort) match {
           case Some(value) =>
             Some(Core.mkEq(Core.mkVar(origName, sort), value))
           case None =>
-            // If next-state variable not in model, assume identity
-            None
+            // fall back to current value if next-state missing
+            model.valueOf(origName, sort.sort).map { current =>
+              Core.mkEq(Core.mkVar(origName, sort), current)
+            }
         }
       }
 
-      if nextStateEqs.isEmpty then
-        Core.mkTrue
-      else
-        Core.mkAnd(nextStateEqs)
-    }
+    val summary =
+      if nextAssignments.isEmpty then Core.mkTrue
+      else Core.mkAnd(nextAssignments)
 
-    // Create a new model/state from this formula
-    // For simplicity, we reuse the original model but this should
-    // ideally create a fresh model
-    State(stateVarsSet, solverEnv, model)
+    val forked = solverEnv.solver.fork()
+    ignore(forked.add(List(summary)))
+    val projectedModel =
+      if forked.checkSat() == Result.SAT then forked.getModel.getOrElse(model)
+      else model
+
+    State(stateVarsSet, solverEnv, projectedModel)
   }
 
   /**
@@ -340,7 +338,7 @@ class ForwardsFixpoint(val trs: TransitionSystem,
     val violatingStates = stateGraph.allNodes.filter { vertexId =>
       stateGraph.labelOf(vertexId) match {
         case Some(stateLabel) =>
-          val stateFormula = stateLabel.summarize
+          val stateFormula = summarizeState(stateLabel)
 
           // Check if state ∧ ¬property is satisfiable
           solver.push()
@@ -374,6 +372,41 @@ class ForwardsFixpoint(val trs: TransitionSystem,
       explorationSteps = currStep,
       unexploredStates = worklist.size
     )
+  }
+
+  /**
+   * Build a canonical formula summarizing the valuation of current-state variables
+   * in the given state. The result only mentions original (non-next) variables.
+   */
+  private def summarizeState(state: State): Core.Expr[Core.BoolSort] = {
+    val eqs = trs.stateVars.toList
+      .sortBy(_.getOriginalName)
+      .flatMap { tvar =>
+        val origName = tvar.getOriginalName
+        val sort = tvar.getSort
+        state.model.valueOf(origName, sort.sort).map { value =>
+          Core.mkEq(Core.mkVar(origName, sort), value)
+        }
+      }
+
+    if eqs.isEmpty then Core.mkTrue else Core.mkAnd(eqs)
+  }
+
+  /**
+   * Build a canonical formula from a raw model, extracting only current-state variables.
+   */
+  private def summarizeModel(model: Model[?, ?]): Core.Expr[Core.BoolSort] = {
+    val eqs = trs.stateVars.toList
+      .sortBy(_.getOriginalName)
+      .flatMap { tvar =>
+        val origName = tvar.getOriginalName
+        val sort = tvar.getSort
+        model.valueOf(origName, sort.sort).map { value =>
+          Core.mkEq(Core.mkVar(origName, sort), value)
+        }
+      }
+
+    if eqs.isEmpty then Core.mkTrue else Core.mkAnd(eqs)
   }
 }
 

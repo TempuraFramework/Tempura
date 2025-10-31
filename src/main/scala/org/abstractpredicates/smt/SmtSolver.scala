@@ -19,14 +19,6 @@ object SmtSolver {
   // formula in a particular solver.
   type LoweredFormula[S <: Core.Sort[S], U] = (Core.Expr[S], U)
 
-  enum LogicOption {
-    case UF
-    case Arithmetic
-    case Quantifier
-    case Datatype
-    case Arrays
-  }
-
   enum Result {
     case SAT
     case UNSAT
@@ -40,9 +32,35 @@ object SmtSolver {
       }
   }
 
-  type Logic = List[LogicOption]
+  enum Arith {
+    case LIA
+    case NIA
+    case NoArith
+  }
 
+  // Arithmetic, Quantifier, Datatype+Arrays
+  type Logic = (Arith, Boolean, Boolean)
 
+  val arithFree : Logic = (Arith.NoArith, true, true)
+  val allLia : Logic = (Arith.LIA, true, true)
+  val allNia : Logic = (Arith.NIA, true, true)
+
+  def parseLogic(l: Logic) : String = {
+    l match {
+      case (Arith.LIA, true, true) => "AUFDTLIA"
+      case (Arith.LIA, true, false) => "LIA"
+      case (Arith.LIA, false, true) => "QF_AUFDTLIA"
+      case (Arith.LIA, false, false) => "QF_LIA"
+      case (Arith.NIA, true, true) => "AUFDTNIA"
+      case (Arith.NIA, true, false) => "NIA"
+      case (Arith.NIA, false, true) => "QF_AUFDTNIA"
+      case (Arith.NIA, false, false) => "QF_NIA"
+      case (Arith.NoArith, true, true) => "ALL"
+      case (Arith.NoArith, true, false) => "AUFDTLIA"
+      case (Arith.NoArith, false, true) => "QF_AUFDTLIA"
+      case (Arith.NoArith, false, false) => "QF_UF"
+    }
+  }
 
   class LazyEnv[T](val lookup: String => Option[T]) {
 
@@ -60,23 +78,40 @@ object SmtSolver {
 
   }
 
-  trait Model[LoweredTerm, LoweredVarDecl](val solver: Solver[LoweredTerm, LoweredVarDecl]) {
+  trait Interpretation {
+    def formula(): Core.Expr[Core.BoolSort]
+    def formula(vocab: Set[(String, Core.BoxedSort)]): Core.Expr[Core.BoolSort]
+    def valueOf[S <: Core.Sort[S]](s: String, sort: S): Option[Core.Expr[S]]
+    def vocabulary(): (List[Core.BoxedSort], List[String])
+    def evaluate[S <: Core.Sort[S]](e: Core.Expr[S]): Core.BoxedExpr
+    def apply(arg: String, sort: Core.BoxedSort) : Option[Core.BoxedExpr]
+  }
+
+  trait Model[LoweredTerm, LoweredVarDecl](val solver: Solver[LoweredTerm, LoweredVarDecl]) extends Interpretation {
 
     def formula(): Core.Expr[Core.BoolSort]
+    
+    def formula(vocab: Set[(String, Core.BoxedSort)]): Core.Expr[Core.BoolSort] 
 
     def valueOf[S <: Core.Sort[S]](s: String, sort: S): Option[Core.Expr[S]]
 
     def vocabulary(): (List[Core.BoxedSort], List[String])
 
     def evaluate[S <: Core.Sort[S]](e: Core.Expr[S]): Core.BoxedExpr
-
-    def asTerm(vocabulary: List[String]): LoweredTerm
-
+    
     def asNegatedTerm(): LoweredTerm
+    
+    def asNegatedTerm(vocab: Set[(String, Core.BoxedSort)]) : LoweredTerm
 
     def asTerm(): LoweredTerm
+    
+    def asTerm(vocabulary: Set[(String, Core.BoxedSort)]): LoweredTerm
   }
   
+  //
+  // A SolverEnvironment instance is the boxed representation of a Solver instance,
+  // with LoweredTerm, LoweredVarDecl both concretized
+  //
   trait SolverEnvironment {
     type LoweredTerm
     type LoweredVarDecl
@@ -88,12 +123,18 @@ object SmtSolver {
       new SolverEnvironment {
         type LoweredTerm = LT
         type LoweredVarDecl = LVD
-        val solver = s
+        val solver: Solver[LT, LVD] = s
       }
     }
   }
   
 
+  //
+  // Generic representation of a SMT solver interface. (LT, LVD) represents the type
+  // of a formula in the backend SMT solver, and the type of a variable declaration in the
+  // backend SMT solver, correspondingly. We need these information because we wish to 
+  // sometimes save the work of having to re-compile formulas, as much as possible.
+  //
   trait Solver[LT, LVD](typeEnv: Core.TypeEnv, interp: Core.InterpEnv) {
 
     type LoweredTerm = LT // type representing a term in underlying SMT solver
@@ -177,7 +218,7 @@ object SmtSolver {
       try body
       finally pop()
 
-    def allSat(): List[Model[LT, LVD]] = {
+    def allSat(vocab: Set[(String, Core.BoxedSort)]): List[Model[LT, LVD]] = {
       var models: List[Model[LT, LVD]] = List()
 
       var stop = false
@@ -192,7 +233,7 @@ object SmtSolver {
           } else getModel match {
             case Some(m) =>
               println(s"     allSat: got model ${m.toString}, round ${counter}")
-              val blockingClause = m.asNegatedTerm()
+              val blockingClause = m.asNegatedTerm(vocab)
               println(s"           - blocking condition: ${blockingClause.toString}")
               addTerms(List(blockingClause))
               models = m :: models
