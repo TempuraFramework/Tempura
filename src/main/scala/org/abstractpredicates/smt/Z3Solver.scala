@@ -1,17 +1,19 @@
 package org.abstractpredicates.smt
 
 import com.microsoft.z3
-import com.microsoft.z3.{ArraySort, Expr, FuncDecl, Solver, Sort, Status}
+import com.microsoft.z3.{ArraySort, Expr, FuncDecl, FuncInterp, Solver, Sort, Status}
 import com.microsoft.z3.enumerations.{Z3_decl_kind, Z3_lbool, Z3_sort_kind}
 import org.abstractpredicates.expression.{Core, LetRemover, Visitor}
 import org.abstractpredicates.helpers.Utils.*
 import cats.syntax.all.*
 import cats.Traverse
 import cats.implicits.*
+import com.microsoft.z3.FuncDecl.Parameter
 import org.abstractpredicates.expression.Core.*
 import org.abstractpredicates.smt.SmtSolver.Result
 import org.abstractpredicates.helpers.Utils.*
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayDeque as Stack
 
 
@@ -88,6 +90,7 @@ object Z3Solver {
       }
     }
 
+    // TODO: move this into the initialize() method; but this requires refactoring users of this API.
     ////////////////////// Initialization Code //////////////////////
     // register update hooks so that all subsequent calls to typeEnv/interpEnv auto-translates
     // into Z3 solver calls
@@ -1041,6 +1044,13 @@ object Z3Solver {
       }
     }
 
+    override def lookupDecl[S <: Core.Sort[S]](v: String, s: S): Option[LoweredVarDecl] = {
+      try
+        Some(this.funcMap(v))
+      catch
+        case _ => None
+    }
+
 
     override def initialize(l: SmtSolver.Logic): Unit = {
       reset()
@@ -1102,11 +1112,30 @@ object Z3Solver {
       }
     }
 
-    override def getUnsatCore: List[LoweredTerm] = {
+    override def getUnsatCore: Option[Z3UnsatCore] = {
       appendHistory("getUnsatCore()")
-      // Not fully implemented: would need to extract unsat core from Z3
       val core = solver.getUnsatCore
-      core.map(x => x.asInstanceOf[LoweredTerm]).toList
+      println(s"Z3 --- getUnsatCore --- ${core.map(x => x.toString).mkString("Array(", ", ", ")")}")
+      core match {
+        case _ if core.equals(null) || core.toString.equals("null") => None
+        case Array() => None
+        case _ => Some(Z3UnsatCore(core.toSet, this))
+      }
+    }
+  }
+
+
+  class Z3UnsatCore(val coreTerms: Set[z3.BoolExpr], solver: Z3Solver.Z3Solver)
+    extends SmtSolver.UnsatCore[z3.Expr[z3.Sort], z3.FuncDecl[z3.Sort]](solver) {
+
+    override def terms(): Set[Expr[Sort]] = {
+      coreTerms.map(x => x.asInstanceOf[z3.Expr[z3.Sort]])
+    }
+
+    override def formulas(): Set[Core.Expr[BoolSort]] = {
+      coreTerms.map(x =>
+        solver.liftTerm(x.asInstanceOf[z3.Expr[z3.Sort]]).unify(Core.BoolSort()).get
+      )
     }
   }
 
@@ -1178,19 +1207,115 @@ object Z3Solver {
       context.mkNot(conjunct).asInstanceOf[z3.Expr[z3.Sort]]
     }
 
+    //
+    // A constDecl yields a term in the formula representation of the model, whereas
+    // a function declration yields a FuncInterp, which gets translated into a forall axiom.
+    //
+    private[smt] def funcInterpToAxiom(fv: FuncDecl[z3.Sort], fi: FuncInterp[z3.Sort]): z3.BoolExpr = {
+      val ctx = solver.getContext
+      val arity = fv.getArity
+      val domainSorts = fv.getDomain
+
+      val entryEqualities: Array[z3.BoolExpr] =
+        fi.getEntries.map { entry =>
+          val groundArgs = entry.getArgs
+          val entryValue = entry.getValue
+          ctx.mkEq(ctx.mkApp(fv, groundArgs *), entryValue)
+        }
+
+      val elseClause: Option[z3.BoolExpr] =
+        Option(fi.getElse).map { elseValue =>
+          if arity == 0 then
+            ctx.mkEq(fv.apply(), elseValue)
+          else {
+            val boundVars: IndexedSeq[z3.Expr[z3.Sort]] =
+              (0 until arity).map { i =>
+                ctx.mkBound(arity - 1 - i, domainSorts(i))
+              }
+
+            val matchClauses: Array[z3.BoolExpr] =
+              fi.getEntries.map { entry =>
+                val groundArgs = entry.getArgs
+                val equalities =
+                  (0 until arity).map { idx =>
+                    ctx.mkEq(boundVars(idx), groundArgs(idx)).asInstanceOf[z3.BoolExpr]
+                  }
+                if equalities.isEmpty then ctx.mkTrue()
+                else if equalities.length == 1 then equalities.head
+                else ctx.mkAnd(equalities.toArray *)
+              }
+
+            val guard: z3.BoolExpr =
+              if matchClauses.isEmpty then ctx.mkTrue()
+              else {
+                val disjunction =
+                  if matchClauses.length == 1 then matchClauses.head
+                  else ctx.mkOr(matchClauses.toArray *)
+                ctx.mkNot(disjunction).asInstanceOf[z3.BoolExpr]
+              }
+
+            val applied =
+              ctx.mkApp(fv, boundVars.toArray *).asInstanceOf[z3.Expr[z3.Sort]]
+
+            val equality =
+              ctx.mkEq(applied, elseValue).asInstanceOf[z3.BoolExpr]
+
+            val body =
+              if matchClauses.isEmpty then equality
+              else ctx.mkImplies(guard, equality).asInstanceOf[z3.BoolExpr]
+
+            val names = (0 until arity).map(i => ctx.mkSymbol(s"arg_$i").asInstanceOf[com.microsoft.z3.Symbol]).toArray
+
+            ctx.mkForall(domainSorts, names, body, 0, null, null, null, null)
+          }
+        }
+
+      val conjuncts = entryEqualities.toList ++ elseClause.toList
+
+      conjuncts match {
+        case Nil =>
+          ctx.mkTrue()
+        case single :: Nil =>
+          single
+        case many =>
+          ctx.mkAnd(many.toArray *)
+      }
+    }
+
     override def asNegatedTerm(vocab: Set[(String, BoxedSort)]): this.solver.LoweredTerm = {
       val context = solver.getContext
 
+      println("entering asNegatedTerm...")
+
+      println("model: " + model.toString)
+
+
       val declEqualities: List[z3.BoolExpr] =
         vocab.map { case (name, sort) =>
-          val c = context.mkConst(name, solver.lowerSort(sort))
-          context.mkEq(c, model.evaluate(c, enableCompletion))
+              sort.sort match {
+                case f: Core.FunSort[t] =>
+                  this.solver.lookupDecl(name, sort) match {
+                    case Some(decl) =>
+                      Option(this.model.getFuncInterp(decl)) match {
+                        case Some(funcInterp) =>
+                          funcInterpToAxiom(decl, funcInterp)
+                        case None =>
+                          context.mkTrue()
+                      }
+                    case None =>
+                      failwith(s"error: declaration of ${name} not found in solver object")
+                  }
+                case _ =>
+                  val c = context.mkConst(name, solver.lowerSort(sort))
+                  val evaluationResult = model.evaluate(c, enableCompletion)
+                  context.mkEq(c, evaluationResult)
+              }
         }.toList
 
       val conjunct =
         declEqualities match {
           case Nil => context.mkTrue()
-          case _ => context.mkAnd(declEqualities.toArray*)
+          case _ => context.mkAnd(declEqualities.toArray *)
         }
       context.mkNot(conjunct).asInstanceOf[z3.Expr[z3.Sort]]
     }

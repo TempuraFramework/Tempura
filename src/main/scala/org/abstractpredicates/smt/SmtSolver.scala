@@ -41,11 +41,11 @@ object SmtSolver {
   // Arithmetic, Quantifier, Datatype+Arrays
   type Logic = (Arith, Boolean, Boolean)
 
-  val arithFree : Logic = (Arith.NoArith, true, true)
-  val allLia : Logic = (Arith.LIA, true, true)
-  val allNia : Logic = (Arith.NIA, true, true)
+  val arithFree: Logic = (Arith.NoArith, true, true)
+  val allLia: Logic = (Arith.LIA, true, true)
+  val allNia: Logic = (Arith.NIA, true, true)
 
-  def parseLogic(l: Logic) : String = {
+  def parseLogic(l: Logic): String = {
     l match {
       case (Arith.LIA, true, true) => "AUFDTLIA"
       case (Arith.LIA, true, false) => "LIA"
@@ -80,34 +80,46 @@ object SmtSolver {
 
   trait Interpretation {
     def formula(): Core.Expr[Core.BoolSort]
+
     def formula(vocab: Set[(String, Core.BoxedSort)]): Core.Expr[Core.BoolSort]
+
     def valueOf[S <: Core.Sort[S]](s: String, sort: S): Option[Core.Expr[S]]
+
     def vocabulary(): (List[Core.BoxedSort], List[String])
+
     def evaluate[S <: Core.Sort[S]](e: Core.Expr[S]): Core.BoxedExpr
-    def apply(arg: String, sort: Core.BoxedSort) : Option[Core.BoxedExpr]
+
+    def apply(arg: String, sort: Core.BoxedSort): Option[Core.BoxedExpr]
   }
 
   trait Model[LoweredTerm, LoweredVarDecl](val solver: Solver[LoweredTerm, LoweredVarDecl]) extends Interpretation {
 
     def formula(): Core.Expr[Core.BoolSort]
-    
-    def formula(vocab: Set[(String, Core.BoxedSort)]): Core.Expr[Core.BoolSort] 
+
+    def formula(vocab: Set[(String, Core.BoxedSort)]): Core.Expr[Core.BoolSort]
 
     def valueOf[S <: Core.Sort[S]](s: String, sort: S): Option[Core.Expr[S]]
 
     def vocabulary(): (List[Core.BoxedSort], List[String])
 
     def evaluate[S <: Core.Sort[S]](e: Core.Expr[S]): Core.BoxedExpr
-    
+
     def asNegatedTerm(): LoweredTerm
-    
-    def asNegatedTerm(vocab: Set[(String, Core.BoxedSort)]) : LoweredTerm
+
+    def asNegatedTerm(vocab: Set[(String, Core.BoxedSort)]): LoweredTerm
 
     def asTerm(): LoweredTerm
-    
+
     def asTerm(vocabulary: Set[(String, Core.BoxedSort)]): LoweredTerm
   }
-  
+
+  trait UnsatCore[LoweredTerm, LoweredVarDecl](val solver: Solver[LoweredTerm, LoweredVarDecl]) {
+
+    def terms(): Set[LoweredTerm]
+
+    def formulas(): Set[Core.Expr[Core.BoolSort]]
+  }
+
   //
   // A SolverEnvironment instance is the boxed representation of a Solver instance,
   // with LoweredTerm, LoweredVarDecl both concretized
@@ -117,7 +129,7 @@ object SmtSolver {
     type LoweredVarDecl
     val solver: Solver[LoweredTerm, LoweredVarDecl]
   }
-  
+
   extension [LT, LVD](s: Solver[LT, LVD]) {
     def box: SolverEnvironment {type LoweredTerm = LT; type LoweredVarDecl = LVD} = {
       new SolverEnvironment {
@@ -127,7 +139,7 @@ object SmtSolver {
       }
     }
   }
-  
+
 
   //
   // Generic representation of a SMT solver interface. (LT, LVD) represents the type
@@ -189,11 +201,15 @@ object SmtSolver {
     // and axs is a possibly empty list of axioms that assert `v = e forall arguments of v`.
     def defineVar[S <: Core.Sort[S]](v: String, s: S, e: Core.Expr[S]): (LoweredVarDecl, List[LoweredTerm])
 
+    def lookupDecl[S <: Core.Sort[S]](v: String, s: S) : Option[LoweredVarDecl]
+    
     def defineConst[S <: Core.Sort[S]](v: Core.SortValue[S]): LoweredTerm
 
     def add(fs: List[Core.BoxedExpr]): List[LoweredTerm]
-
+    
     def addTerms(terms: List[LoweredTerm]): List[LoweredTerm]
+
+    def addTerms(t: LoweredTerm*): List[LoweredTerm] = addTerms(t.toList)
 
     def push(): Unit
 
@@ -207,7 +223,7 @@ object SmtSolver {
 
     def getModel: Option[Model[LT, LVD]]
 
-    def getUnsatCore: List[LoweredTerm]
+    def getUnsatCore: Option[UnsatCore[LT, LVD]]
 
     def checkSat(): Result
 

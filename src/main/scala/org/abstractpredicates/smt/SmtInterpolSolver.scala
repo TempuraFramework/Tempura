@@ -15,31 +15,21 @@ object SmtInterpolSolver {
 
   /** Log levels for SMTInterpol solver output */
   enum LogLevel(val value: Int) {
-    case OFF extends LogLevel(0)    // No logging
-    case FATAL extends LogLevel(1)  // Only fatal errors
-    case ERROR extends LogLevel(2)  // Errors and fatal (recommended default)
-    case WARN extends LogLevel(3)   // Warnings and above
-    case INFO extends LogLevel(4)   // Info and above (verbose)
-    case DEBUG extends LogLevel(5)  // Debug and above (very verbose)
-    case TRACE extends LogLevel(6)  // Everything (extremely verbose)
+    case OFF extends LogLevel(0) // No logging
+    case FATAL extends LogLevel(1) // Only fatal errors
+    case ERROR extends LogLevel(2) // Errors and fatal (recommended default)
+    case WARN extends LogLevel(3) // Warnings and above
+    case INFO extends LogLevel(4) // Info and above (verbose)
+    case DEBUG extends LogLevel(5) // Debug and above (very verbose)
+    case TRACE extends LogLevel(6) // Everything (extremely verbose)
   }
 
-  /**
-   * Create a new SMTInterpol solver instance.
-   *
-   * @param typeEnv The type environment
-   * @param interpEnv The interpretation environment
-   * @param logLevel The logging level for SMTInterpol output (default: ERROR)
-   * @return A new SmtInterpolSolver instance
-   */
-  def apply(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv, logLevel: LogLevel = LogLevel.ERROR): SmtInterpolSolver =
-    new SmtInterpolSolver(typeEnv, interpEnv, logLevel)
 
-  final class SmtInterpolSolver(
-    private val typeEnv: Core.TypeEnv,
-    private val interpEnv: Core.InterpEnv,
-    private val logLevel: LogLevel = LogLevel.ERROR
-  ) extends SmtSolver.Solver[Term, FunctionSymbol](typeEnv, interpEnv) {
+  class SmtInterpolSolver(
+                           private val typeEnv: Core.TypeEnv,
+                           private val interpEnv: Core.InterpEnv,
+                           private val logLevel: LogLevel = LogLevel.ERROR
+                         ) extends SmtSolver.Solver[Term, FunctionSymbol](typeEnv, interpEnv) {
 
     override type LoweredSort = Sort
 
@@ -63,19 +53,6 @@ object SmtInterpolSolver {
     private def record(entry: String): Unit = history = entry :: history
 
     override def getHistory: List[String] = history
-
-    typeEnv.registerUpdateHook { (name, sort) =>
-      val lowered = defineSort(sort.sort)
-      s"defineSort $name: ${lowered.toString}"
-    }
-
-    interpEnv.registerUpdateHook { (name, expr) =>
-      val (decl, _) = defineVar(name, expr.sort, expr.e)
-      s"defineVar $name: ${decl.toString}"
-    }
-
-    typeEnv.foreach { case (_, sort) => ignore(defineSort(sort.sort)) }
-    interpEnv.foreach { case (name, boxedExpr) => ignore(defineVar(name, boxedExpr.sort, boxedExpr.e)) }
 
     private def lowerSortAny(sort: Core.Sort[?]): Sort = sort match
       case _: Core.BoolSort => solver.sort(SMTLIBConstants.BOOL)
@@ -533,7 +510,7 @@ object SmtInterpolSolver {
           Core.mkVar(name, funSort).box()
       }
 
-    private def parseLogic(logics: SmtSolver.Logic) : Logics = {
+    private def parseLogic(logics: SmtSolver.Logic): Logics = {
       // Arithmetic, Quantifier, Datatype+Arrays
       logics match {
         case (SmtSolver.Arith.NIA, true, true) => Logics.AUFDTNIA
@@ -544,21 +521,39 @@ object SmtInterpolSolver {
         case (SmtSolver.Arith.LIA, true, false) => Logics.UFLIA
         case (SmtSolver.Arith.LIA, false, true) => Logics.QF_AUFLIA
         case (SmtSolver.Arith.LIA, false, false) => Logics.QF_UFLIA
-        case (SmtSolver.Arith.NoArith, true, true) => Logics.ALL 
+        case (SmtSolver.Arith.NoArith, true, true) => Logics.ALL
         case (SmtSolver.Arith.NoArith, true, false) => Logics.UF
         case (SmtSolver.Arith.NoArith, false, true) => Logics.QF_AUFLIA
         case (SmtSolver.Arith.NoArith, false, false) => Logics.QF_UF
       }
     }
-    
+
+    override def lookupDecl[S <: Core.Sort[S]](v: String, s: S): Option[LoweredVarDecl] = {
+      try Some(funMap(v)) catch case _ => None 
+    }
+
     override def initialize(logicOptions: SmtSolver.Logic): Unit = {
       val targetLogic = Logics.ALL // TODO
       val targetLogicName = targetLogic.toString
-      solver.reset 
+      solver.reset
       solver.setOption(":produce-proofs", true)
       solver.setOption(":produce-models", true)
       solver.setLogic(targetLogicName)
       activeLogic = Some(targetLogicName)
+
+      typeEnv.registerUpdateHook { (name, sort) =>
+        val lowered = defineSort(sort.sort)
+        s"defineSort $name: ${lowered.toString}"
+      }
+
+      interpEnv.registerUpdateHook { (name, expr) =>
+        val (decl, _) = defineVar(name, expr.sort, expr.e)
+        s"defineVar $name: ${decl.toString}"
+      }
+
+      typeEnv.foreach { case (_, sort) => ignore(defineSort(sort.sort)) }
+      interpEnv.foreach { case (name, boxedExpr) => ignore(defineVar(name, boxedExpr.sort, boxedExpr.e)) }
+
       record(s"initialize($targetLogicName)")
     }
 
@@ -596,8 +591,14 @@ object SmtInterpolSolver {
     override def getModel: Option[SmtSolver.Model[Term, FunctionSymbol]] =
       Option(solver.getModel).map(model => new SMTInterpolModel(model, this))
 
-    override def getUnsatCore: List[Term] =
-      Option(solver.getUnsatCore).map(_.toList).getOrElse(Nil)
+    override def getUnsatCore: Option[SmtSolver.UnsatCore[Term, FunctionSymbol]] = {
+      try {
+        val coreTerms = solver.getUnsatCore
+        Some(SMTInterpolUnsatCore(coreTerms.toSet, this))
+      } catch {
+        case _ => None
+      }
+    }
 
     override def checkSat(): SmtSolver.Result =
       solver.checkSat() match {
@@ -607,135 +608,143 @@ object SmtInterpolSolver {
       }
   }
 
-    class SMTInterpolModel(model: de.uni_freiburg.informatik.ultimate.logic.Model,
-                                         solver: SmtInterpolSolver)
-      extends SmtSolver.Model[Term, FunctionSymbol](solver) {
+  class SMTInterpolUnsatCore(coreTerms: Set[Term], solver: SmtInterpolSolver) extends SmtSolver.UnsatCore[Term, FunctionSymbol](solver) {
 
-      override def formula(): Core.Expr[Core.BoolSort] = {
-        val term = asTerm()
-        val expr = solver.liftTerm(term)
-        expr.unify(Core.BoolSort()) match {
-          case Some(unifiedExpr) => unifiedExpr
-          case None => failwith(s"SMTInterpolModel.formula(): Expression constructed from model is ${expr}, which does not return a boolean.")
-        }
-      }
+    override def terms(): Set[Term] = coreTerms
 
-      override def valueOf[S <: Core.Sort[S]](name: String, sort: S): Option[Core.Expr[S]] = {
-        val someExpr = evaluate(Core.mkVar(name, sort))
-        someExpr.unify(sort) match {
-          case Some(unifiedExpr) => Some(unifiedExpr)
-          case None => None
-        }
-      }
+    override def formulas(): Set[Expr[BoolSort]] =
+      coreTerms.map(x => solver.liftTerm(x).unify(Core.BoolSort()).get)
+  }
 
-      override def vocabulary(): (List[Core.BoxedSort], List[String]) = {
-        val definedFunctions = model.getDefinedFunctions.toArray(new Array[FunctionSymbol](0))
-        val constNames = definedFunctions
-          .filter(fs => fs.getParameterSorts.isEmpty)
-          .map(fs => fs.getName)
-          .toList
-        val sorts = definedFunctions
-          .filter(fs => fs.getParameterSorts.isEmpty)
-          .map(fs => solver.liftSort(fs.getReturnSort))
-          .toList
-        (sorts, constNames)
-      }
+  class SMTInterpolModel(model: de.uni_freiburg.informatik.ultimate.logic.Model,
+                         solver: SmtInterpolSolver)
+    extends SmtSolver.Model[Term, FunctionSymbol](solver) {
 
-      override def evaluate[S <: Core.Sort[S]](expr: Core.Expr[S]): Core.BoxedExpr = {
-        val term = solver.lower(expr)
-        val evaluatedTerm = model.evaluate(term)
-        solver.liftTerm(evaluatedTerm)
-      }
-
-      override def asNegatedTerm(): Term = {
-        val term = asTerm()
-        solver.getSolver.term(SMTLIBConstants.NOT, term)
-      }
-
-      override def asTerm(): Term = modelToTerm
-
-      override def formula(vocab: Set[(String, BoxedSort)]): Expr[BoolSort] = {
-        val term = asTerm(vocab)
-        val expr = solver.liftTerm(term)
-        expr.unify(Core.BoolSort()) match {
-          case Some(unifiedExpr) => unifiedExpr
-          case None => failwith(s"SMTInterpolModel.formula(vocab): Expression constructed from model is ${expr}, which does not return a boolean.")
-        }
-      }
-
-      override def asNegatedTerm(vocab: Set[(String, BoxedSort)]): Term =
-        val tt = asTerm(vocab)
-        solver.getSolver.term(SMTLIBConstants.NOT, tt)
-
-
-      def modelToTerm: Term = {
-        val assignments = model
-          .getDefinedFunctions
-          .toArray(new Array[FunctionSymbol](0))
-          .iterator
-          .flatMap(termOfSymbol)
-          .toArray
-
-        assignments.length match
-          case 0 =>
-            solver.getSolver.term(SMTLIBConstants.TRUE)
-          case 1 =>
-            assignments(0)
-          case _ =>
-            solver.getSolver.term(SMTLIBConstants.AND, assignments *)
-            }
-
-      private def termOfSymbol(fs: FunctionSymbol): Option[Term] = {
-        // Skip internal helper symbols that already have built-in definitions.
-        if (fs.isIntern && fs.getDefinition != null) then
-          None
-        else
-          val vars = freshVariables(fs.getParameterSorts)
-          val lhs = applySymbol(fs, vars.map(identity[Term]))
-          val rhs = model.getFunctionDefinition(fs.getName, vars)
-          val eq = solver.getSolver.term(SMTLIBConstants.EQUALS, lhs, rhs)
-          val quantified =
-            if vars.isEmpty then eq
-            else solver.getSolver.quantifier(Script.FORALL, vars, eq)
-          Some(quantified)
-      }
-
-      private def freshVariables(paramSorts: Array[Sort]): Array[TermVariable] = {
-        var counter = 0
-        val vars = new Array[TermVariable](paramSorts.length)
-        while counter < paramSorts.length do
-          val name = s"@m$counter"
-          vars(counter) = solver.getSolver.variable(name, paramSorts(counter))
-          counter += 1
-        vars
-        }
-
-      private def applySymbol(fs: FunctionSymbol, args: Array[Term]): Term = {
-        val indices = fs.getIndices
-        val returnSort: Sort | Null =
-          if fs.isReturnOverload then fs.getReturnSort
-          else null
-
-        solver.getSolver.term(fs.getName, indices, returnSort, args *)
-      }
-
-
-      override def asTerm(vocabulary: Set[(String, BoxedSort)]): Term = {
-        val equalities = vocabulary.map { case (name, sort) =>
-          val c = solver.getSolver.term(name)
-          val value = model.evaluate(c)
-          solver.getSolver.term(SMTLIBConstants.EQUALS, c, value)
-        }.toList
-
-        equalities match {
-          case Nil => solver.getSolver.term(SMTLIBConstants.TRUE)
-          case List(single) => single
-          case _ => solver.getSolver.term(SMTLIBConstants.AND, equalities.toArray*)
-        }
-      }
-
-      override def apply(arg: String, sort: Core.BoxedSort): Option[BoxedExpr] = {
-        Some(solver.liftTerm(model.evaluate(solver.getSolver.term(arg))))
+    override def formula(): Core.Expr[Core.BoolSort] = {
+      val term = asTerm()
+      val expr = solver.liftTerm(term)
+      expr.unify(Core.BoolSort()) match {
+        case Some(unifiedExpr) => unifiedExpr
+        case None => failwith(s"SMTInterpolModel.formula(): Expression constructed from model is ${expr}, which does not return a boolean.")
       }
     }
+
+    override def valueOf[S <: Core.Sort[S]](name: String, sort: S): Option[Core.Expr[S]] = {
+      val someExpr = evaluate(Core.mkVar(name, sort))
+      someExpr.unify(sort) match {
+        case Some(unifiedExpr) => Some(unifiedExpr)
+        case None => None
+      }
+    }
+
+    override def vocabulary(): (List[Core.BoxedSort], List[String]) = {
+      val definedFunctions = model.getDefinedFunctions.toArray(new Array[FunctionSymbol](0))
+      val constNames = definedFunctions
+        .filter(fs => fs.getParameterSorts.isEmpty)
+        .map(fs => fs.getName)
+        .toList
+      val sorts = definedFunctions
+        .filter(fs => fs.getParameterSorts.isEmpty)
+        .map(fs => solver.liftSort(fs.getReturnSort))
+        .toList
+      (sorts, constNames)
+    }
+
+    override def evaluate[S <: Core.Sort[S]](expr: Core.Expr[S]): Core.BoxedExpr = {
+      val term = solver.lower(expr)
+      val evaluatedTerm = model.evaluate(term)
+      solver.liftTerm(evaluatedTerm)
+    }
+
+    override def asNegatedTerm(): Term = {
+      val term = asTerm()
+      solver.getSolver.term(SMTLIBConstants.NOT, term)
+    }
+
+    override def asTerm(): Term = modelToTerm
+
+    override def formula(vocab: Set[(String, BoxedSort)]): Expr[BoolSort] = {
+      val term = asTerm(vocab)
+      val expr = solver.liftTerm(term)
+      expr.unify(Core.BoolSort()) match {
+        case Some(unifiedExpr) => unifiedExpr
+        case None => failwith(s"SMTInterpolModel.formula(vocab): Expression constructed from model is ${expr}, which does not return a boolean.")
+      }
+    }
+
+    override def asNegatedTerm(vocab: Set[(String, BoxedSort)]): Term =
+      val tt = asTerm(vocab)
+      solver.getSolver.term(SMTLIBConstants.NOT, tt)
+
+
+    def modelToTerm: Term = {
+      val assignments = model
+        .getDefinedFunctions
+        .toArray(new Array[FunctionSymbol](0))
+        .iterator
+        .flatMap(termOfSymbol)
+        .toArray
+
+      assignments.length match
+        case 0 =>
+          solver.getSolver.term(SMTLIBConstants.TRUE)
+        case 1 =>
+          assignments(0)
+        case _ =>
+          solver.getSolver.term(SMTLIBConstants.AND, assignments *)
+    }
+
+    private def termOfSymbol(fs: FunctionSymbol): Option[Term] = {
+      // Skip internal helper symbols that already have built-in definitions.
+      if (fs.isIntern && fs.getDefinition != null) then
+        None
+      else
+        val vars = freshVariables(fs.getParameterSorts)
+        val lhs = applySymbol(fs, vars.map(identity[Term]))
+        val rhs = model.getFunctionDefinition(fs.getName, vars)
+        val eq = solver.getSolver.term(SMTLIBConstants.EQUALS, lhs, rhs)
+        val quantified =
+          if vars.isEmpty then eq
+          else solver.getSolver.quantifier(Script.FORALL, vars, eq)
+        Some(quantified)
+    }
+
+    private def freshVariables(paramSorts: Array[Sort]): Array[TermVariable] = {
+      var counter = 0
+      val vars = new Array[TermVariable](paramSorts.length)
+      while counter < paramSorts.length do
+        val name = s"@m$counter"
+        vars(counter) = solver.getSolver.variable(name, paramSorts(counter))
+        counter += 1
+      vars
+    }
+
+    private def applySymbol(fs: FunctionSymbol, args: Array[Term]): Term = {
+      val indices = fs.getIndices
+      val returnSort: Sort | Null =
+        if fs.isReturnOverload then fs.getReturnSort
+        else null
+
+      solver.getSolver.term(fs.getName, indices, returnSort, args *)
+    }
+
+
+    override def asTerm(vocabulary: Set[(String, BoxedSort)]): Term = {
+      val equalities = vocabulary.map { case (name, sort) =>
+        val c = solver.getSolver.term(name)
+        val value = model.evaluate(c)
+        solver.getSolver.term(SMTLIBConstants.EQUALS, c, value)
+      }.toList
+
+      equalities match {
+        case Nil => solver.getSolver.term(SMTLIBConstants.TRUE)
+        case List(single) => single
+        case _ => solver.getSolver.term(SMTLIBConstants.AND, equalities.toArray *)
+      }
+    }
+
+    override def apply(arg: String, sort: Core.BoxedSort): Option[BoxedExpr] = {
+      Some(solver.liftTerm(model.evaluate(solver.getSolver.term(arg))))
+    }
+  }
 }

@@ -6,6 +6,7 @@ import org.abstractpredicates.helpers.Utils.*
 import org.abstractpredicates.abstraction.IdempotentSemiring
 import org.abstractpredicates.transitions.TransitionFormula.Peeled.Branch
 import org.abstractpredicates.smt.SmtSolver.*
+import org.abstractpredicates.expression.Syntax.*
 
 object TransitionFormula {
 
@@ -36,11 +37,11 @@ object TransitionFormula {
     def peel(expr: Core.Expr[Core.BoolSort]): Peeled = {
       val solver = solverEnv.solver
       expr match { // TODO; this is fine for now.
-        case Core.Or(args) =>
+        case Or(args) =>
           Peeled.Disjunctive(args.map(x => peel(x)))
-        case Core.Implies(prem, concl) =>
+        case Implies(prem, concl) =>
           Peeled.Implicative(List(), List(Peeled.Branch(prem, peel(concl))))
-        case Core.Lop("and", args, BoolSort(), BoolSort()) =>
+        case And(args) =>
           //
           // Pattern match on the form
           // (and <conjuncts> (=> <premise1> <concl1>) ... (=> <premise_n> <concl_n>))

@@ -3,6 +3,7 @@ package org.abstractpredicates.transitions
 import org.scalatest.funsuite.AnyFunSuite
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.helpers.Utils.*
+import org.abstractpredicates.expression.Syntax.*
 import org.abstractpredicates.parsing.io.TransitionSystemReader
 import org.abstractpredicates.smt.SmtSolver.*
 import org.abstractpredicates.smt.Z3Solver

@@ -142,8 +142,7 @@ class SmtInterpolLogLevelTests extends AnyFunSuite {
 
     // Create interpolation engine with WARN log level
     val interpolation = new org.abstractpredicates.smt.interpolants.SmtInterpolInterpolation(
-      baseSolver,
-      LogLevel.WARN
+      baseSolver
     )
 
     // The interpolation engine creates its own internal SMTInterpol solver

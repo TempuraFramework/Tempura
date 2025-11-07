@@ -5,6 +5,7 @@ import org.abstractpredicates.expression.Core
 import org.abstractpredicates.helpers.Utils.*
 import org.abstractpredicates.smt.SmtSolver.*
 import org.scalatest.funsuite.AnyFunSuite
+import org.abstractpredicates.expression.Syntax.*
 
 class Cvc5BackendTests extends AnyFunSuite {
 
@@ -12,6 +13,47 @@ class Cvc5BackendTests extends AnyFunSuite {
     val typeEnv = Core.emptyTypeEnv
     val interpEnv = Core.emptyInterpEnv
     (typeEnv, interpEnv, Cvc5Solver.Cvc5Solver(typeEnv, interpEnv))
+  }
+
+  test("cvc5 native interpolation test") {
+    import io.github.cvc5._
+
+    val d_tm = new TermManager()
+    val d_solver = new Solver(d_tm)
+
+    println("CVC5 Version : " + d_solver.getVersion)
+    d_solver.setLogic("QF_LIA")
+    d_solver.setOption("produce-interpolants", "true")
+    d_solver.setOption("incremental", "false")
+
+    val intSort = d_tm.getIntegerSort
+    val zero = d_tm.mkInteger(0)
+    val x = d_tm.mkConst(intSort, "x")
+    val y = d_tm.mkConst(intSort, "y")
+    val z = d_tm.mkConst(intSort, "z")
+
+    // Assumptions for interpolation: x + y > 0 /\ x < 0
+    d_solver.assertFormula(d_tm.mkTerm(Kind.GT, d_tm.mkTerm(Kind.ADD, x, y), zero))
+    d_solver.assertFormula(d_tm.mkTerm(Kind.LT, x, zero))
+    // Conjecture for interpolation: y + z > 0 \/ z < 0
+    val conj = d_tm.mkTerm(Kind.OR, d_solver.mkTerm(Kind.GT, d_solver.mkTerm(Kind.ADD, y, z), zero), d_solver.mkTerm(Kind.LT, z, zero))
+    // Call the interpolation api, while the resulting interpolant is the output
+    val output = d_solver.getInterpolant(conj)
+
+    // We expect the resulting output to be a boolean formula
+    assert(output.getSort.isBoolean)
+
+    // try with a grammar, a simple grammar admitting true
+    val bsort = d_tm.getBooleanSort
+    val truen = d_tm.mkBoolean(true)
+    val start = d_tm.mkVar(bsort)
+    val g = d_solver.mkGrammar(Array(), Array(start))
+    val conj2 = d_tm.mkTerm(Kind.EQUAL, zero, zero)
+    g.addRule(start, truen)
+    // Call the interpolation api, while the resulting interpolant is the output
+    val output2 = d_solver.getInterpolant(conj2, g)
+    // interpolant must be true
+    assert(output2 == truen)
   }
 
   test("cvc5 model exposes boolean assignments") {

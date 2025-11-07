@@ -6,6 +6,7 @@ import org.abstractpredicates.expression.Core
 import org.abstractpredicates.expression.Core.*
 import org.abstractpredicates.helpers.Utils.*
 import org.abstractpredicates.smt.SmtSolver.*
+import org.abstractpredicates.expression.Syntax.*
 
 class SMTInterpolBackendTests extends AnyFunSuite {
 

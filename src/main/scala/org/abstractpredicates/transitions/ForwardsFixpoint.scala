@@ -4,6 +4,7 @@ import org.abstractpredicates.helpers.Utils.*
 import org.abstractpredicates.smt.SmtSolver.{Model, Result, Solver, SolverEnvironment}
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.transitions.States.{State, States}
+import org.abstractpredicates.expression.Syntax.*
 
 import scala.annotation.tailrec
 import scala.collection.mutable.{Map as MMap, Queue as MQueue, Set as MSet}
@@ -109,7 +110,7 @@ class ForwardsFixpoint(val trs: TransitionSystem,
 
           // Block this model by adding ¬model.formula() and recurse
           val newCond = cond match {
-            case Core.And(subExpr) =>
+            case And(subExpr) =>
               Core.mkAnd(Core.mkNot(model.formula()) :: subExpr)
             case _ =>
               Core.mkAnd(List(Core.mkNot(model.formula()), cond))

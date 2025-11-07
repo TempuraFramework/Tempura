@@ -22,16 +22,14 @@ object Cvc5Solver {
     private val termManager = new TermManager()
     private val solver = new Solver(termManager)
 
-    solver.setOption("produce-models", "true")
-    solver.setOption("incremental", "true")
-
-    private val sortCache: mutable.Map[Core.BoxedSort, Cvc5Sort] = mutable.Map()
-    private val exprCache: mutable.Map[Core.BoxedExpr, Cvc5Term] = mutable.Map()
-    private val funcCache: mutable.Map[String, Cvc5Term] = mutable.Map()
-    private val constCache: mutable.Map[String, Cvc5Term] = mutable.Map()
-    private val datatypeCtorCache: mutable.Map[(String, String), Cvc5Term] = mutable.Map()
+    private val sortMap: mutable.Map[Core.BoxedSort, Cvc5Sort] = mutable.Map()
+    private val exprMap: mutable.Map[Core.BoxedExpr, Cvc5Term] = mutable.Map()
+    private val funcMap: mutable.Map[String, Cvc5Term] = mutable.Map()
+    private val constMap: mutable.Map[String, Cvc5Term] = mutable.Map()
+    private val datatypeCtorMap: mutable.Map[(String, String), Cvc5Term] = mutable.Map()
 
     private given ClassTag[Cvc5Term] = ClassTag(classOf[Cvc5Term])
+
     private given ClassTag[Cvc5Sort] = ClassTag(classOf[Cvc5Sort])
 
     private var history: List[String] = Nil
@@ -44,53 +42,41 @@ object Cvc5Solver {
 
     def getTermManager: TermManager = termManager
 
-    def declaredConstants: Map[String, Cvc5Term] = constCache.toMap
+    def declaredConstants: Map[String, Cvc5Term] = constMap.toMap
 
-    def declaredFunctions: Map[String, Cvc5Term] = funcCache.toMap
+    def declaredFunctions: Map[String, Cvc5Term] = funcMap.toMap
 
     def lookupDatatypeConstructor(sort: String, constructor: String): Option[Cvc5Term] =
-      datatypeCtorCache.get((sort, constructor))
-
-    typeEnv.registerUpdateHook { (name, sort) =>
-      val lowered = defineSort(sort.sort)
-      s"defineSort ${name}: ${lowered.toString}"
-    }
-
-    interpEnv.registerUpdateHook { (name, expr) =>
-      val (decl, _) = defineVar(name, expr.sort, expr.e)
-      s"defineVar ${name}: ${decl.toString}"
-    }
-
-    typeEnv.foreach { case (_, boxedSort) => ignore(defineSort(boxedSort.sort)) }
-    interpEnv.foreach { case (n, boxedExpr) => ignore(defineVar(n, boxedExpr.sort, boxedExpr.e)) }
+      datatypeCtorMap.get((sort, constructor))
 
     private def cacheDatatypeConstructors(sortName: String, sort: Cvc5Sort): Unit = {
       if sort.isDatatype then
         val datatype: Datatype = sort.getDatatype
         (0 until datatype.getNumConstructors).foreach { idx =>
           val ctor = datatype.getConstructor(idx)
-          datatypeCtorCache.update((sortName, ctor.getName), ctor.getTerm)
+          datatypeCtorMap.update((sortName, ctor.getName), ctor.getTerm)
         }
     }
 
-    private def lowerSortAny(sort: Core.Sort[?]): Cvc5Sort =
+    private def doLowerSort[S <: Core.Sort[S]](sort: Core.Sort[S]): Cvc5Sort = {
       sort match
         case _: Core.NumericSort => termManager.getIntegerSort
         case _: Core.BoolSort => termManager.getBooleanSort
-        case arr: Core.ArraySort[?, ?] =>
-          val domain = lowerSortAny(arr.domainSort)
-          val range = lowerSortAny(arr.rangeSort)
+        case arr: Core.ArraySort[_, _] =>
+          val domain = doLowerSort(arr.domainSort)
+          val range = doLowerSort(arr.rangeSort)
           termManager.mkArraySort(domain, range)
         case u: Core.UnInterpretedSort =>
           solver.declareSort(u.sortName, u.numArgs)
-        case alias: Core.AliasSort[?] =>
+        case alias: Core.AliasSort[_] =>
           termManager.mkUninterpretedSort(alias.sortName)
         case finite: Core.FiniteUniverseSort => declareFinite(finite)
         case dt: Core.DatatypeConstructorSort => declareDatatype(dt)
         case fun: Core.FunSort[?] => unexpected("cannot lower function sorts in CVC5 backend", fun)
+    }
 
-    private def declareDatatype(sort: Core.DatatypeConstructorSort): Cvc5Sort =
-      sortCache.get(sort.box) match
+    private def declareDatatype(sort: Core.DatatypeConstructorSort): Cvc5Sort = {
+      sortMap.get(sort.box) match
         case Some(existing) => existing
         case None =>
           val datatypeDecl: DatatypeDecl = termManager.mkDatatypeDecl(sort.sortName)
@@ -101,17 +87,18 @@ object Cvc5Solver {
               if fieldSort == sort then
                 ctorDecl.addSelectorSelf(fieldName)
               else
-                ctorDecl.addSelector(fieldName, lowerSortAny(fieldSort))
+                ctorDecl.addSelector(fieldName, doLowerSort(fieldSort))
             }
             datatypeDecl.addConstructor(ctorDecl)
           }
           val lowered = termManager.mkDatatypeSort(datatypeDecl)
-          sortCache.update(sort.box, lowered)
+          sortMap.update(sort.box, lowered)
           cacheDatatypeConstructors(sort.sortName, lowered)
           lowered
+    }
 
-    private def declareFinite(sort: Core.FiniteUniverseSort): Cvc5Sort =
-      sortCache.getOrElseUpdate(sort.box, {
+    private def declareFinite(sort: Core.FiniteUniverseSort): Cvc5Sort = {
+      sortMap.getOrElseUpdate(sort.box, {
         val decl = termManager.mkDatatypeDecl(sort.sortName)
         (0 until sort.card).foreach { idx =>
           val ctorDecl = termManager.mkDatatypeConstructorDecl(getEnumName(idx, sort))
@@ -121,27 +108,30 @@ object Cvc5Solver {
         cacheDatatypeConstructors(sort.sortName, lowered)
         lowered
       })
+    }
 
-    override def lowerSort[A <: Core.Sort[A]](s: A): Cvc5Sort =
-      sortCache.getOrElseUpdate(s.box, lowerSortAny(s))
+    override def lowerSort[A <: Core.Sort[A]](s: A): Cvc5Sort = {
+      sortMap.getOrElseUpdate(s.box, doLowerSort(s))
+    }
 
-    override def defineSort[A <: Core.Sort[A]](s: A): Cvc5Sort =
+    override def defineSort[A <: Core.Sort[A]](s: A): Cvc5Sort = {
       val lowered = lowerSort(s)
       record(s"defineSort(${s.sortName})")
       lowered
+    }
 
     override def defineConst[S <: Core.Sort[S]](value: Core.SortValue[S]): Cvc5Term = lowerValue(value)
 
     override def declareVar[S <: Core.Sort[S]](name: String, sort: S): Cvc5Term =
       sort match
         case funSort: Core.FunSort[t] =>
-          funcCache.getOrElseUpdate(name, {
-            val domain = funSort.domainSort.map(arg => lowerSortAny(arg.sort))
-            val range = lowerSortAny(funSort.rangeSort)
+          funcMap.getOrElseUpdate(name, {
+            val domain = funSort.domainSort.map(arg => doLowerSort(arg.sort))
+            val range = doLowerSort(funSort.rangeSort)
             solver.declareFun(name, domain.toArray, range)
           })
         case _ =>
-          constCache.getOrElseUpdate(name, {
+          constMap.getOrElseUpdate(name, {
             val loweredSort = lowerSort(sort)
             termManager.mkConst(loweredSort, name)
           })
@@ -153,7 +143,7 @@ object Cvc5Solver {
           expr match
             case Core.Macro(_, args, body) =>
               val argTerms = args.map { case (argName, boxedSort) =>
-                termManager.mkVar(lowerSortAny(boxedSort.sort), argName)
+                termManager.mkVar(doLowerSort(boxedSort.sort), argName)
               }
               val localBound = args.map(_._1).zip(argTerms).toMap
               val bodyTerm = lower(localBound, body)
@@ -180,28 +170,34 @@ object Cvc5Solver {
 
     override def lowerValue[S <: Core.Sort[S]](value: Core.SortValue[S]): Cvc5Term =
       value match
-        case Core.SortValue.BoolValue(flag) => if flag then termManager.mkTrue() else termManager.mkFalse()
-        case Core.SortValue.NumericValue(n) => termManager.mkInteger(n.toLong)
-        case Core.SortValue.UnInterpretedValue(name, sort) => declareVar(name, sort)
+        case Core.SortValue.BoolValue(flag) =>
+          if flag then
+            termManager.mkTrue()
+          else
+            termManager.mkFalse()
+        case Core.SortValue.NumericValue(n) =>
+          termManager.mkInteger(n.toLong)
+        case Core.SortValue.UnInterpretedValue(name, sort) =>
+          declareVar(name, sort)
         case Core.SortValue.ArrayValue(default, arrSort) =>
           val defaultTerm = lower(default)
           termManager.mkConstArray(lowerSort(arrSort.domainSort), defaultTerm)
         case Core.SortValue.FiniteUniverseValue(index, finite) =>
           val lowered = declareFinite(finite)
           val ctorName = getEnumName(index, finite)
-          datatypeCtorCache.getOrElse((finite.name, ctorName),
+          datatypeCtorMap.getOrElse((finite.name, ctorName),
             unexpected(s"constructor ${ctorName} missing for finite sort ${finite.name}", finite))
         case Core.SortValue.DatatypeValue(inst, datatypeSort) =>
           val lowered = declareDatatype(datatypeSort)
           val ctorName = inst.getName
-          val ctor = datatypeCtorCache.getOrElse((datatypeSort.sortName, ctorName),
+          val ctor = datatypeCtorMap.getOrElse((datatypeSort.sortName, ctorName),
             unexpected(s"constructor ${ctorName} missing for datatype ${datatypeSort.sortName}", datatypeSort))
           val args = inst.getParams.map(param => lower(param.e))
           if args.isEmpty then ctor else termManager.mkTerm(Kind.APPLY_CONSTRUCTOR, (ctor +: args).toArray)
         case Core.SortValue.AliasSortValue(name, sort) => termManager.mkConst(lowerSort(sort), name)
 
     override def lower[S <: Core.Sort[S]](expr: Core.Expr[S]): Cvc5Term =
-      exprCache.getOrElseUpdate(expr.box(), lower(Map.empty[String, Cvc5Term], expr))
+      exprMap.getOrElseUpdate(expr.box(), lower(Map.empty[String, Cvc5Term], expr))
 
     private def lower[S <: Core.Sort[S]](bound: Map[String, Cvc5Term], expr: Core.Expr[S]): Cvc5Term =
       expr match
@@ -219,7 +215,7 @@ object Cvc5Solver {
           termManager.mkTerm(Kind.IMPLIES, lower(bound, lhs), lower(bound, rhs))
         case Core.Top("=>", premise, thn, els, _) =>
           termManager.mkTerm(Kind.ITE, lower(bound, premise), lower(bound, thn), lower(bound, els))
-        case Core.Bop(op @ (">" | ">=" | "<" | "<="), lhs, rhs, _) =>
+        case Core.Bop(op@(">" | ">=" | "<" | "<="), lhs, rhs, _) =>
           val kind = op match
             case ">" => Kind.GT
             case ">=" => Kind.GEQ
@@ -295,7 +291,7 @@ object Cvc5Solver {
               }
               termManager.mkTerm(Kind.APPLY_UF, (funTerm +: loweredArgs).toArray)
             case Core.Var(name, _) =>
-              val funTerm = funcCache.getOrElse(name, declareVar(name, bodyExpr.sort))
+              val funTerm = funcMap.getOrElse(name, declareVar(name, bodyExpr.sort))
               val loweredArgs = bindings.map(_._2.e).map(arg => lower(bound, arg))
               termManager.mkTerm(Kind.APPLY_UF, (funTerm +: loweredArgs).toArray)
             case _ => unexpected("cannot apply non-function expression in CVC5 backend", expr)
@@ -315,9 +311,9 @@ object Cvc5Solver {
     private def declareFunction(name: String,
                                 domain: List[Core.BoxedSort],
                                 range: Core.Sort[?]): Cvc5Term =
-      funcCache.getOrElseUpdate(name, {
-        val domainSorts = domain.map(ds => lowerSortAny(ds.sort))
-        val rangeSort = lowerSortAny(range)
+      funcMap.getOrElseUpdate(name, {
+        val domainSorts = domain.map(ds => doLowerSort(ds.sort))
+        val rangeSort = doLowerSort(range)
         solver.declareFun(name, domainSorts.toArray, rangeSort)
       })
 
@@ -333,7 +329,7 @@ object Cvc5Solver {
         Core.arraySort(domSort, rangeSort)
       else if sort.isUninterpretedSort then
         typeEnv.lookup(sortName).getOrElse {
-          val numArgs = 0  // CVC5 doesn't expose arity directly
+          val numArgs = 0 // CVC5 doesn't expose arity directly
           Core.UnInterpretedSort(sortName, numArgs).box
         }
       else if sort.isDatatype then
@@ -357,7 +353,7 @@ object Cvc5Solver {
         val name = term.getUninterpretedSortValue
         val sort = liftSort(term.getSort)
         liftSort(term.getSort) match {
-          case u @ Core.UnInterpretedSort(_, _) => return Core.mkConst(Core.SortValue.UnInterpretedValue(name, u))
+          case u@Core.UnInterpretedSort(_, _) => return Core.mkConst(Core.SortValue.UnInterpretedValue(name, u))
           case _ => unexpected(s"liftTerm: uninterpreted sort value $name has non-uninterpreted sort $sort", term)
         }
 
@@ -366,7 +362,7 @@ object Cvc5Solver {
         val baseValue = liftTerm(term.getConstArrayBase)
         val arraySort = liftSort(term.getSort)
         arraySort.sort match
-          case arr @ Core.ArraySort(_, _) =>
+          case arr@Core.ArraySort(_, _) =>
             baseValue.unify(arr.rangeSort) match
               case Some(unifiedBase) =>
                 return Core.mkConstArray(arr.domainSort, unifiedBase)
@@ -507,7 +503,7 @@ object Cvc5Solver {
           val arr = liftTerm(children(0))
           val idx = liftTerm(children(1))
           arr.sort match
-            case arrSort @ Core.ArraySort(_, _) =>
+            case arrSort@Core.ArraySort(_, _) =>
               arr.unify(Core.ArraySort(idx.sort, arrSort.rangeSort)) match
                 case Some(unifiedArr) =>
                   Core.mkSelect(unifiedArr, idx.e).box()
@@ -566,19 +562,19 @@ object Cvc5Solver {
 
           interpEnv.lookup(funcName) match
             case Some(funcExpr) =>
-                // Try as uninterpreted function
-                val retSort = liftSort(term.getSort)
-                val domainSorts = args.toList.map(_.sort.box)
-                val funSort = Core.funSort(domainSorts, retSort)
-                funcExpr.unify(funSort) match {
-                  case Some(_) =>
-                    val func = Core.mkVar(funcName, funSort)
-                    val bindings = args.zipWithIndex.map { case (arg, i) =>
-                      (s"arg_$i", arg)
-                    }
-                    Core.mkSubst("app", bindings, func).box()
-                  case None => unexpected(s"CVC5 function definition ${funcName} does not match ${funcExpr} in environment")
-                }
+              // Try as uninterpreted function
+              val retSort = liftSort(term.getSort)
+              val domainSorts = args.toList.map(_.sort.box)
+              val funSort = Core.funSort(domainSorts, retSort)
+              funcExpr.unify(funSort) match {
+                case Some(_) =>
+                  val func = Core.mkVar(funcName, funSort)
+                  val bindings = args.zipWithIndex.map { case (arg, i) =>
+                    (s"arg_$i", arg)
+                  }
+                  Core.mkSubst("app", bindings, func).box()
+                case None => unexpected(s"CVC5 function definition ${funcName} does not match ${funcExpr} in environment")
+              }
             case None =>
               // Undeclared function
               val retSort = liftSort(term.getSort)
@@ -651,14 +647,34 @@ object Cvc5Solver {
         Core.mkVar(funcName, sort).box()
       }
 
+    override def lookupDecl[S <: Sort[S]](v: String, s: S): Option[LoweredVarDecl] = {
+      try Some(funcMap(v)) catch case _ => None
+    }  
+
     override def initialize(logic: SmtSolver.Logic): Unit = {
       solver.setOption("produce-models", "true")
+      // solver.setOption("produce-unsat-cores", "true")
+      solver.setOption("produce-interpolants", "true")
       solver.setOption("incremental", "true")
       val logicName = SmtSolver.parseLogic(logic)
       solver.setLogic(logicName)
       record(s"initialize($logicName)")
-    }
 
+      typeEnv.registerUpdateHook { (name, sort) =>
+        val lowered = defineSort(sort.sort)
+        s"defineSort ${name}: ${lowered.toString}"
+      }
+
+      interpEnv.registerUpdateHook { (name, expr) =>
+        val (decl, _) = defineVar(name, expr.sort, expr.e)
+        s"defineVar ${name}: ${decl.toString}"
+      }
+
+      typeEnv.foreach { case (_, boxedSort) => ignore(defineSort(boxedSort.sort)) }
+      interpEnv.foreach { case (n, boxedExpr) => ignore(defineVar(n, boxedExpr.sort, boxedExpr.e)) }
+
+    }
+    
     override def add(fs: List[Core.BoxedExpr]): List[Cvc5Term] = {
       val lowered = fs.map(expr => lower(expr.e))
       lowered.foreach(solver.assertFormula)
@@ -678,7 +694,7 @@ object Cvc5Solver {
 
     override def reset(): Unit = {
       solver.resetAssertions()
-      exprCache.clear()
+      exprMap.clear()
       record("reset()")
     }
 
@@ -688,10 +704,19 @@ object Cvc5Solver {
       try {
         Some(new Cvc5Model(this))
       } catch
-        case _: Throwable => None
+        case t: Throwable =>
+          println("CVC5 threw an error during getModel: " + t.toString)
+          None
     }
 
-    override def getUnsatCore: List[Cvc5Term] = Option(solver.getUnsatCore).map(_.toList).getOrElse(Nil)
+    override def getUnsatCore: Option[SmtSolver.UnsatCore[Cvc5Term, Cvc5Term]] = {
+      try {
+        val coreTerms = solver.getUnsatCore
+        Some(Cvc5UnsatCore(coreTerms.toSet, this))
+      } catch {
+        case _ => None
+      }
+    }
 
     override def checkSat(): SmtSolver.Result = {
       val result = solver.checkSat()
@@ -699,6 +724,14 @@ object Cvc5Solver {
       else if result.isUnsat then SmtSolver.Result.UNSAT
       else SmtSolver.Result.UNKNOWN
     }
+  }
+
+  class Cvc5UnsatCore(coreTerms: Set[Cvc5Term], solver: Cvc5Solver) extends SmtSolver.UnsatCore[Cvc5Term, Cvc5Term](solver) {
+
+    override def terms(): Set[Cvc5Term] = coreTerms
+
+    override def formulas(): Set[Expr[BoolSort]] =
+      coreTerms.map(x => solver.liftTerm(x).unify(Core.boolSort).get)
   }
 
   class Cvc5Model(cvc5: Cvc5Solver)

@@ -4,6 +4,7 @@ import scala.collection.mutable.Map as MM
 import scala.collection.mutable.Set as MS
 import scala.collection.immutable.Map as IM
 import scala.collection.immutable.Set as IS
+import org.abstractpredicates.expression.Syntax.*
 
 import cats.implicits.*
 

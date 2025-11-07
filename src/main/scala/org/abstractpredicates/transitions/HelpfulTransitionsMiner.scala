@@ -4,6 +4,7 @@ import org.abstractpredicates.expression.Core
 import org.abstractpredicates.smt.SmtSolver
 import org.abstractpredicates.smt.SmtSolver.Model
 import org.abstractpredicates.transitions.Abstractor.TransitionModel
+import org.abstractpredicates.expression.Syntax.*
 
 class HelpfulTransitionsMiner[LT, LVD](solver: SmtSolver.Solver[LT, LVD],
                                        stateVars: Set[TimedVariable],

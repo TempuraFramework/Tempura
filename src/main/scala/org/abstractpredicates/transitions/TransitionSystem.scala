@@ -5,6 +5,7 @@ import org.abstractpredicates.expression.Core
 import org.abstractpredicates.expression.Core.{BoolSort, InterpEnv, TypeEnv}
 import org.abstractpredicates.smt.SmtSolver.*
 import org.abstractpredicates.helpers.Utils.*
+import org.abstractpredicates.expression.Syntax.*
 
 class TransitionSystem(val stateVars: Set[TimedVariable],
                        val init: Core.Expr[BoolSort], // formula over state variables

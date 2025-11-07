@@ -127,6 +127,10 @@ object SmtLibSolver {
       case other => unsupported(s"expression not supported by SMT-LIB printer: ${other}")
     }
 
+    override def lookupDecl[S <: Sort[S]](v: String, s: S): Option[LoweredVarDecl] = {
+      None // TODO
+    }
+
     override def liftTerm(expr: String): Core.BoxedExpr =
       unsupported("liftTerm is not supported for SMT-LIB printer backend")
 
@@ -136,9 +140,10 @@ object SmtLibSolver {
     override def liftFunc(func: String): Core.BoxedExpr =
       interpEnv.lookup(func).getOrElse(Core.mkVar(func, Core.BoolSort()).box())
 
-    override def initialize(logicOptions: SmtSolver.Logic): Unit =
+    override def initialize(logicOptions: SmtSolver.Logic): Unit = {
       appendHistory(s"; set-logic ${SmtSolver.parseLogic(logicOptions)}")
-
+    }
+    
     override def add(fs: List[Core.BoxedExpr]): List[String] = {
       val lowered = fs.map(expr => s"(assert ${lower(expr.e)})")
       lowered.foreach(assertions.addOne)
@@ -181,11 +186,11 @@ object SmtLibSolver {
       clone.stack = this.stack
       clone
 
-    override def getModel: Option[SmtSolver.Model[String, String]] = None
+    override def getModel: Option[SmtSolver.Model[String, String]] = None // TODO 
 
-    override def getUnsatCore: List[String] = Nil
+    override def getUnsatCore: Option[SmtSolver.UnsatCore[String, String]] = None // TODO
 
-    override def checkSat(): SmtSolver.Result = SmtSolver.Result.UNKNOWN
+    override def checkSat(): SmtSolver.Result = SmtSolver.Result.UNKNOWN // TODO 
 
     /** Render accumulated SMT-LIB commands. */
     def asScript: String =
