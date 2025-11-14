@@ -13,9 +13,9 @@ class SyntaxTests extends AnyFunSuite {
     val typeEnv = Core.emptyTypeEnv
     val interpEnv = Core.emptyInterpEnv
 
-    val x = interpEnv | ("x", Core.boolSort)
-    val y = interpEnv | ("y", Core.boolSort)
-    val z = interpEnv | ("z", Core.boolSort)
+    val x = interpEnv |- ("x", Core.boolSort)
+    val y = interpEnv |- ("y", Core.boolSort)
+    val z = interpEnv |- ("z", Core.boolSort)
 
     assert(/\(x, y) == Core.mkAnd(List(x, y)))
     assert(\/(y, x) == Core.mkOr(List(y, x)))

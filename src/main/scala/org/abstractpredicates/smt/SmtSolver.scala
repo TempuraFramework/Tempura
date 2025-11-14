@@ -87,7 +87,7 @@ object SmtSolver {
 
     def vocabulary(): (List[Core.BoxedSort], List[String])
 
-    def evaluate[S <: Core.Sort[S]](e: Core.Expr[S]): Core.BoxedExpr
+    def evaluate[S <: Core.Sort[S]](e: Core.Expr[S]): Core.Expr[S]
 
     def apply(arg: String, sort: Core.BoxedSort): Option[Core.BoxedExpr]
   }
@@ -102,7 +102,7 @@ object SmtSolver {
 
     def vocabulary(): (List[Core.BoxedSort], List[String])
 
-    def evaluate[S <: Core.Sort[S]](e: Core.Expr[S]): Core.BoxedExpr
+    def evaluate[S <: Core.Sort[S]](e: Core.Expr[S]): Core.Expr[S]
 
     def asNegatedTerm(): LoweredTerm
 
@@ -128,6 +128,8 @@ object SmtSolver {
     type LoweredTerm
     type LoweredVarDecl
     val solver: Solver[LoweredTerm, LoweredVarDecl]
+    
+    def apply(): Solver[LoweredTerm, LoweredVarDecl] = solver
   }
 
   extension [LT, LVD](s: Solver[LT, LVD]) {
@@ -234,6 +236,43 @@ object SmtSolver {
       try body
       finally pop()
 
+    def efficientAllSat(vocab: Set[(String, Core.BoxedSort)]): List[Model[LT, LVD]] = {
+      var models: List[Model[LT, LVD]] = List()
+
+      def aux(fixed: Map[String, LT], unfixed: List[(String, Core.BoxedSort)]) : Boolean = {
+        withPushed {
+          checkSat() match {
+            case Result.UNSAT => false
+            case Result.SAT =>
+              unfixed match {
+                case t :: rest =>
+                  val model = getModel.get 
+                  models = model :: models 
+                  val tFixed = model.asTerm(Set(t))
+                  val tUnfixed = model.asNegatedTerm(Set(t))
+                  addTerms(tFixed)
+                  aux(fixed + ((t._1, tFixed)), rest)
+                  addTerms(tUnfixed)
+                  aux(fixed + ((t._1, tUnfixed)), rest)
+                case List() =>
+                  val model = getModel.get
+                  models = model :: models
+                  true
+              }
+            case Result.UNKNOWN =>
+              unexpected(s"allSat: got UNKNOWN as a result. State: \n === fixed terms === \n" +
+                s"${fixed.mkString(" ;\n ")} \n === unfixed terms === \n" 
+                + s"${unfixed.mkString(";\n ")}"
+                + "\n === models === \n" 
+                + s"${models.mkString(" ;\n ")}")
+          }
+        }
+      }
+
+      aux(Map(), vocab.toList)
+      models
+    }
+
     def allSat(vocab: Set[(String, Core.BoxedSort)]): List[Model[LT, LVD]] = {
       var models: List[Model[LT, LVD]] = List()
 
@@ -241,6 +280,8 @@ object SmtSolver {
       println("allSat: Starting allSat...")
       var counter = 0
 
+      var conditions = List[LT]()
+      
       withPushed {
         while (!stop) {
           counter = counter + 1
@@ -250,7 +291,8 @@ object SmtSolver {
             case Some(m) =>
               println(s"     allSat: got model ${m.toString}, round ${counter}")
               val blockingClause = m.asNegatedTerm(vocab)
-              println(s"           - blocking condition: ${blockingClause.toString}")
+              println(s"=================== blocking condition: ======\n ${blockingClause.toString}\n==================")
+              conditions = blockingClause :: conditions
               addTerms(List(blockingClause))
               models = m :: models
             case None =>

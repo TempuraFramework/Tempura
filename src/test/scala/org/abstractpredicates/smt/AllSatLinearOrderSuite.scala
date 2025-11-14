@@ -38,6 +38,12 @@ class AllSatLinearOrderSuite extends AnyFunSuite {
     def succ(lhs: Core.Expr[Core.FiniteUniverseSort], rhs: Core.Expr[Core.FiniteUniverseSort]): Core.Expr[Core.BoolSort] =
       app(succFun, lhs, rhs)
 
+    // forall X, Y, Z.
+    // not(successor(X, Z))
+    //  or
+    // (X < Z) & not(X < Y /\ Y < Z)
+    // Either Z is successor of X, or Z is successor of X and is characterized by
+    //   the fact that there is no Y such that X < Y and Y < Z (that is, Y in middle of (X, Z)).
     val immediateSuccessor =
       Core.mkForall(
         vars("X", "Y", "Z"),
@@ -45,6 +51,8 @@ class AllSatLinearOrderSuite extends AnyFunSuite {
           (lt(v("X"), v("Z")) /\ Core.mkNot(lt(v("X"), v("Y")) /\ lt(v("Y"), v("Z"))))
       )
 
+    // forall T, U, V.
+    //  either not(T < U /\ U < V) or T < V
     val transitiveOrder =
       Core.mkForall(
         vars("T", "U", "V"),
@@ -85,20 +93,16 @@ class AllSatLinearOrderSuite extends AnyFunSuite {
     val typeEnv = Core.emptyTypeEnv
     val interpEnv = Core.emptyInterpEnv
 
-    val timeSort = Core.FiniteUniverseSort("time", cardinality)
-    typeEnv.add("time", timeSort)
+    val timeSort = typeEnv |- FiniteUniverseSort("time", cardinality)
 
     val ltTimeSort = Core.FunSort(List(timeSort.box, timeSort.box), Core.BoolSort())
     val succTimeSort = Core.FunSort(List(timeSort.box, timeSort.box), Core.BoolSort())
-    val ltTimeFun = Core.mkVar("<:time:time", ltTimeSort)
-    val timeSuccFun = Core.mkVar("time.succ", succTimeSort)
-    val zeroTime = Core.mkVar("0:time", timeSort)
-    interpEnv.add("<:time:time", ltTimeFun)
-    interpEnv.add("time.succ", timeSuccFun)
-    interpEnv.add("0:time", zeroTime)
+    val ltTimeFun = interpEnv |- ("<:time:time", ltTimeSort)
+    val timeSuccFun = interpEnv |- ("time.succ", succTimeSort)
+    val zeroTime = interpEnv |- ("0:time", timeSort)
 
     val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
-    solver.initialize(SmtSolver.arithFree)
+    solver.initialize(SmtSolver.allLia)
 
     val assertions = timeLinearOrderAxioms(timeSort, ltTimeFun, timeSuccFun, zeroTime)
 
@@ -124,6 +128,8 @@ class AllSatLinearOrderSuite extends AnyFunSuite {
   }
 
   test("allSat linear order on time sort with cardinality 2") {
+    println(s" ******** Expected model count: ${expectedModelCount(2)}")
+
     val observed = runAllSatTest(2)
     assert(observed == expectedModelCount(2))
   }
@@ -131,5 +137,15 @@ class AllSatLinearOrderSuite extends AnyFunSuite {
   test("allSat linear order on time sort with cardinality 3") {
     val observed = runAllSatTest(3)
     assert(observed == expectedModelCount(3))
+  }
+
+  test("allSat with cardinality 4") {
+    val observed = runAllSatTest(4)
+    assert(observed == expectedModelCount(4))
+  }
+
+  test("printing model counts") {
+    (1 until 10).foreach(x =>
+    println(s"${x} -> ${expectedModelCount(x)}"))
   }
 }

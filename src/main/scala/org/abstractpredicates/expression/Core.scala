@@ -893,10 +893,10 @@ object Core {
   def mkSubst[Y <: Sort[Y]](attr: String, bindings: List[(String, BoxedExpr)], macroExpr: Expr[FunSort[Y]]): Expr[Y] =
     Substitute[Y](attr, bindings, macroExpr)(using macroExpr.sort)
 
-  def mkApp[Y <: Sort[Y]](domain: List[(String, BoxedSort)], macroExpr: Macro[Y]): Expr[Y] =
+  def mkApp[Y <: Sort[Y]](domain: List[(String, BoxedExpr)], macroExpr: Expr[FunSort[Y]]): Expr[Y] =
     Core.mkSubst("app",
-      domain.map(x => (x._1, Core.mkVar(x._1, x._2))),
-      Core.mkVar(macroExpr.name, macroExpr.sort)
+      domain.map(x => (x._1, x._2)),
+      macroExpr
     )
 
   //

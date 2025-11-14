@@ -3,6 +3,7 @@ package org.abstractpredicates.transitions
 import org.scalatest.funsuite.AnyFunSuite
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.expression.Syntax.*
+import org.abstractpredicates.helpers.{DotPrinter, FormulaPrinter}
 import org.abstractpredicates.helpers.Utils.*
 import org.abstractpredicates.smt.SmtSolver.*
 import org.abstractpredicates.smt.{SmtSolver, Z3Solver}
@@ -245,12 +246,25 @@ class BackwardsFixpointTest extends AnyFunSuite {
     val (trs, solver) = createCounterSystemWithLiveness()
     val fixpoint = BackwardsFixpoint(trs, solver, List())
 
-    fixpoint.setMaxSteps(20)
+    fixpoint.setMaxSteps(20000000)
     val graph = fixpoint.run()
 
     val stats = fixpoint.getStatistics
 
     println(s"Counter system (backwards) statistics:\n${stats}")
+
+    val graph0 = fixpoint.getStateGraph
+    val graphPrinter =
+      DotPrinter.Printer(graph, true,
+        (x => DotPrinter.defaultNodeConfig), (e => DotPrinter.defaultEdgeConfig),
+        Some(x =>
+          s"${x}: ${graph.labelOf(x).toString}"
+        ),
+        Some(e =>
+          s"${FormulaPrinter.ExprPrinter(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))()}"
+        ))
+
+    graphPrinter.visualizeDOT(None, true)
 
     // Should have exactly 4 states (all states can reach the live state due to cycle)
     assert(stats.totalStates == 4, s"Expected 4 states, got ${stats.totalStates}")

@@ -80,8 +80,8 @@ class UnsatCoreTests extends AnyFunSuite {
   private def guardedLinearScenario(testEnv: SolverTestEnv): Scenario = {
     val interp = testEnv.interpEnv
 
-    val x = interp | ("x", Core.numericSort)
-    val guard = interp | ("guard", Core.boolSort)
+    val x = interp |- ("x", Core.numericSort)
+    val guard = interp |- ("guard", Core.boolSort)
 
     // System of constraints:
     // (1) guard = T

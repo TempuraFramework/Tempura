@@ -10,9 +10,12 @@ import scala.collection.mutable.{Map as MMap, Queue as MQueue, Set as MSet}
 
 class BackwardsFixpoint(val trs: TransitionSystem,
                         val solverEnv: SolverEnvironment,
-                        val theoryAxioms: List[Core.Expr[Core.BoolSort]]) {
+                        val theoryAxioms: List[solverEnv.LoweredTerm], val disambiguate: Boolean ) {
 
   import BackwardsFixpoint.*
+
+  def this(ts: TransitionSystem, s: SolverEnvironment, ta: List[Core.Expr[Core.BoolSort]]) =
+    this(ts, s, ta.map(x => s().lower(x)), false)
 
   val solver: Solver[solverEnv.LoweredTerm, solverEnv.LoweredVarDecl] = solverEnv.solver
 
@@ -57,7 +60,7 @@ class BackwardsFixpoint(val trs: TransitionSystem,
    */
   def initialize(): Unit = {
     // Add theory axioms to solver context (these remain for entire exploration)
-    ignore(solver.add(theoryAxioms.map(x => Core.BoxedExpr.make(x.sort, x))))
+    ignore(solver.addTerms(theoryAxioms))
     // Add transition system assumptions (safety assumptions)
     trs.insertAssumptions(solverEnv)
     // Add liveness assumptions
@@ -76,36 +79,6 @@ class BackwardsFixpoint(val trs: TransitionSystem,
     val models = solver.allSat(trs.stateVars.map((x: TimedVariable) => (x.getOriginalName, x.getSort)))
     solver.pop()
     models
-  }
-
-  private def partialAllSat(cond: Core.Expr[Core.BoolSort], n: Int) : List[Model[solverEnv.LoweredTerm, solverEnv.LoweredVarDecl]] = {
-    if n <= 0 then List()
-    else {
-      solver.push()
-      solver.add(List(cond))
-      solver.checkSat() match {
-        case Result.SAT =>
-          val model = solver.getModel.get
-          solver.pop()
-
-          // Block this model by adding ¬model.formula() and recurse
-          val newCond = cond match {
-            case And(subExpr) =>
-              Core.mkAnd(Core.mkNot(model.formula()) :: subExpr)
-            case _ =>
-              Core.mkAnd(List(Core.mkNot(model.formula()), cond))
-          }
-          model :: partialAllSat(newCond, n - 1)
-
-        case Result.UNSAT =>
-          solver.pop()
-          List()
-
-        case Result.UNKNOWN =>
-          solver.pop()
-          failwith(s"partialAllSat: Solver returned UNKNOWN at condition ${cond.toString}")
-      }
-    }
   }
 
   private def addStateToGraph(state: State): Int = {
@@ -164,11 +137,34 @@ class BackwardsFixpoint(val trs: TransitionSystem,
   }
 
   /**
-   * Compute all predecessor states from a given state. */
+   * Compute all predecessor states from a given state.
+   *
+   * FIXED: Deduplicate models that represent the same state but differ only on
+   * non-state variables (like next-state variables or auxiliary variables).
+   */
   private def computePredecessors(state: State) = {
     val nextStateConstraints = buildNextStateConstraints(state)
     val predecessorQuery = Core.mkAnd(List(trs.trans, nextStateConstraints))
-    computeAllSat(predecessorQuery)
+    val allModels = computeAllSat(predecessorQuery)
+
+    // Deduplicate: keep only models that differ on current state variables
+    val uniqueStates = scala.collection.mutable.Set[Core.Expr[Core.BoolSort]]()
+    val uniqueModels = allModels.filter { model =>
+      val stateFormula = summarizeModel(model)
+      if (uniqueStates.contains(stateFormula)) {
+        false  // Duplicate state, skip this model
+      } else {
+        uniqueStates.add(stateFormula)
+        true  // Unique state, keep this model
+      }
+    }
+
+    // Log deduplication stats
+    if (allModels.size != uniqueModels.size) {
+      println(s"    Deduplicated ${allModels.size} models to ${uniqueModels.size} unique states")
+    }
+
+    uniqueModels
   }
 
   private def modelToState(model: Model[solverEnv.LoweredTerm, solverEnv.LoweredVarDecl]): State = {
@@ -183,13 +179,15 @@ class BackwardsFixpoint(val trs: TransitionSystem,
     println(s"Exploring state ${vertexId} backwards at step ${currStep} (rank=$currentRank)")
 
     val predecessorModels = computePredecessors(state)
-    println(s"  Found ${predecessorModels.size} predecessors")
+    println(s"  Found ${predecessorModels.size} unique predecessors")
 
     predecessorModels.foreach { predModel =>
       val predState = modelToState(predModel)
       val predVertexId = addStateToGraph(predState)
 
-      val edgeOpt = stateGraph.addEdge(vertexId, predVertexId, trs.trans)
+      // FIXED: Edge direction now represents the forward transition
+      // predState --trans--> currState
+      val edgeOpt = stateGraph.addEdge(predVertexId, vertexId, trs.trans)
       val fair = isFairEdge(predState, state)
       edgeOpt.foreach { added =>
         if fair then fairEdgesBuf.addOne(added)

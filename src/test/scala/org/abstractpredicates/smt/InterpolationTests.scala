@@ -30,9 +30,9 @@ class InterpolationTests extends AnyFunSuite {
 
     val (_, interpEnv, solver) = freshSolver()
 
-    val x = interpEnv | ("x", Core.numericSort)
-    val y = interpEnv | ("y", Core.numericSort)
-    val z = interpEnv | ("z", Core.numericSort)
+    val x = interpEnv |- ("x", Core.numericSort)
+    val y = interpEnv |- ("y", Core.numericSort)
+    val z = interpEnv |- ("z", Core.numericSort)
 
     // Assumptions for interpolation: x + y > 0 /\ x < 0
     val fmlaA0 = (x + y) > 0

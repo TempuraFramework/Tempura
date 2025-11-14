@@ -2,6 +2,7 @@ package org.abstractpredicates.expression
 
 import org.abstractpredicates.expression.Core.*
 import org.abstractpredicates.helpers.Utils
+import org.abstractpredicates.helpers.Utils.unexpected
 
 import scala.annotation.tailrec
 
@@ -28,19 +29,25 @@ object Syntax {
     infix def <=(b: Expr[NumericSort]): Expr[BoolSort] = Core.mkLe(a, b)
   }
   extension (a: Expr[BoolSort]*) {
-    infix def \/(bs: Expr[BoolSort]*) : Expr[BoolSort] = Core.mkOr(a.toList ++ bs.toList)
-    infix def /\(bs: Expr[BoolSort]*) : Expr[BoolSort] = Core.mkAnd(a.toList ++ bs.toList)
+    infix def \/(bs: Expr[BoolSort]*): Expr[BoolSort] = Core.mkOr(a.toList ++ bs.toList)
+    infix def /\(bs: Expr[BoolSort]*): Expr[BoolSort] = Core.mkAnd(a.toList ++ bs.toList)
   }
+
   infix def /\(args: Expr[BoolSort]*): Expr[BoolSort] = Core.mkOr(args.toList)
+
   infix def \/(args: Expr[BoolSort]*): Expr[BoolSort] = Core.mkAnd(args.toList)
-  infix def |=|[X <: Sort[X]](lhs: Expr[X], rhs: Expr[X]) : Expr[BoolSort] = Core.mkEq(lhs, rhs)
+
+  infix def |=|[X <: Sort[X]](lhs: Expr[X], rhs: Expr[X]): Expr[BoolSort] = Core.mkEq(lhs, rhs)
+
   infix def |@|[X <: Sort[X], Y <: Sort[Y]](arr: Expr[ArraySort[X, Y]], idx: Expr[X]): Expr[Y] = Core.mkSelect(arr, idx)
 
   extension [X <: Sort[X], Y <: Sort[Y]](arr: Expr[ArraySort[X, Y]]) {
-    infix def @<(idx: Expr[X]) : SelectorSyntax[X, Y] = SelectorSyntax(arr, idx)
+    infix def @<(idx: Expr[X]): SelectorSyntax[X, Y] = SelectorSyntax(arr, idx)
   }
+
   case class SelectorSyntax[X <: Sort[X], Y <: Sort[Y]](arr: Expr[ArraySort[X, Y]], idx: Expr[X]) {
     infix def > : Expr[Y] = Core.mkSelect(arr, idx)
+
     infix def >=(rhs: Expr[Y]): Expr[ArraySort[X, Y]] = Core.mkStore(arr, idx, rhs)
   }
 
@@ -97,7 +104,29 @@ object Syntax {
       expr
     }
 
-    infix def |[X <: Sort[X]](n: String, s: X): Expr[X] = newVar(n, s)
+    infix def |-[X <: Sort[X]](n: String, s: X): Expr[X] = newVar(n, s)
+  }
+
+  extension (tyE: TypeEnv) {
+    infix def |-[X <: Sort[X]](x: X): X = {
+      tyE.add(x.sortName, x)
+      x
+    }
+  }
+
+  extension [X <: Sort[X]](f: Expr[FunSort[X]]) {
+    def apply(args: (String, BoxedExpr)*): Expr[X] = {
+      Core.mkApp(args.toList, f)
+    }
+  }
+
+  extension (fs: FiniteUniverseSort) {
+    infix def %(i: Int): Core.Const[FiniteUniverseSort] = {
+      if i < 0 || i > fs.card then 
+        unexpected(s"Error: ${fs.toString} has ${fs.card} elements but got ${i}")
+      else
+        Core.Const(SortValue.FiniteUniverseValue(i, fs))
+    }
   }
 
   //

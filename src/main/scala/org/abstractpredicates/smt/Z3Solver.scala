@@ -4,6 +4,7 @@ import com.microsoft.z3
 import com.microsoft.z3.{ArraySort, Expr, FuncDecl, FuncInterp, Solver, Sort, Status}
 import com.microsoft.z3.enumerations.{Z3_decl_kind, Z3_lbool, Z3_sort_kind}
 import org.abstractpredicates.expression.{Core, LetRemover, Visitor}
+import org.abstractpredicates.expression.Syntax.*
 import org.abstractpredicates.helpers.Utils.*
 import cats.syntax.all.*
 import cats.Traverse
@@ -807,7 +808,7 @@ object Z3Solver {
                   val constructorName = expr.getFuncDecl.getName.toString
                   val accessorDomain = expr.getFuncDecl.getDomain
                   val sort =
-                    if accessorDomain.length == 0 then
+                    if accessorDomain.isEmpty then
                       unexpected(s"liftTerm: Z3_OP_DT_ACCESSOR: accessor ${constructorName} has empty domain", expr)
                     else
                       liftSort(accessorDomain(0))
@@ -864,7 +865,44 @@ object Z3Solver {
                       funcMap.update(name, funcDecl)
                       Core.mkConst(Core.uninterpreted(name, uSort))
                     case _ =>
-                      unexpected(s"liftTerm error: expression type is Z3_OP_UNINTERPRETED but has ${expr.getSort} as return sort", expr)
+                      val funcName = expr.getFuncDecl.getName
+                      val funcSort = Core.funSort(expr.getFuncDecl.getDomain.toList.map(liftSort), liftSort(expr.getFuncDecl.getRange).sort)
+                      val func = interpEnv(funcName.toString).getOrElse(unexpected(s"Error: applying function not-found ${funcName.toString}"))
+                      funcSort.unify(func.sort) match {
+                        case Some(_) =>
+                          func.e match {
+                            case mac @ Core.Macro(name, vars, bodyExpr) =>
+                              val varsEnv = vars.toArray
+                              val funcArgs = expr.getArgs.zipWithIndex.map((x, i) =>
+                                if x.isVar then {
+                                  val boundVarIdx = x.getIndex
+                                  val sort = liftSort(x.getSort).sort
+                                  // deBruijnStack(i) is the i-th indexed variable name.
+                                  assert(deBruijnStack.size > boundVarIdx)
+                                  val varName = deBruijnStack(boundVarIdx)
+                                  (varName, Core.mkVar(varName, sort).box())
+                                } else {
+                                  (varsEnv(i)._1, liftTerm(x.asInstanceOf[LoweredTerm]))
+                                }).toList
+                              Core.mkApp(funcArgs, mac)
+                            case v @ Core.Var(name, _) =>
+                              val funcArgs = expr.getArgs.zipWithIndex.map((x, i) =>
+                                if x.isVar then {
+                                  val boundVarIdx = x.getIndex
+                                  val sort = liftSort(x.getSort).sort
+                                  // deBruijnStack(i) is the i-th indexed variable name.
+                                  assert(deBruijnStack.size > boundVarIdx)
+                                  val varName = deBruijnStack(boundVarIdx)
+                                  (varName, Core.mkVar(varName, sort).box())
+                                } else {
+                                  (s"arg$i", liftTerm(x.asInstanceOf[LoweredTerm]))
+                                }).toList
+                              Core.mkApp(funcArgs, Core.mkVar(funcName.toString, funcSort))
+                            case _ => unexpected(s"error: got ${func}")
+                          }
+
+                        case None => unexpected(s"Error: applying a non-function: ${}")
+                      }
                   }
                 case _ =>
                   unsupported(s"Unrecognized expression: ${expr.toString} with decl type ${declKind}", expr)
@@ -872,14 +910,9 @@ object Z3Solver {
             }
 
             if domainSorts.isEmpty then {
-              declKind match {
-                case Z3_decl_kind.Z3_OP_UNINTERPRETED =>
-                  val name = decl.getName.toString
-                  funcMap.update(name, decl)
-                  Core.mkVar(name, rangeSort)
-                case _ =>
-                  decodeDeclByKind()
-              }
+                val name = decl.getName.toString
+                funcMap.update(name, decl)
+                Core.mkVar(name, rangeSort)
             } else {
               decodeDeclByKind()
             }
@@ -1158,6 +1191,7 @@ object Z3Solver {
 
     override def formula(vocab: Set[(String, BoxedSort)]): Core.Expr[Core.BoolSort] = {
       val z3Term = asTerm(vocab)
+      println(s"formula(...): z3 term of model is ${z3Term.toString}")
       val expr = solver.liftTerm(z3Term)
       expr.unify(Core.BoolSort()) match {
         case Some(unifiedExpr) => unifiedExpr
@@ -1165,11 +1199,16 @@ object Z3Solver {
       }
     }
 
-    override def valueOf[S <: Core.Sort[S]](s: String, sort: S): Option[Core.Expr[S]] = {
-      val someExpr = evaluate(Core.mkVar(s, sort))
-      someExpr.unify(sort) match {
-        case Some(unifiedExpr) => Some(unifiedExpr)
-        case None => None
+    override def valueOf[S <: Core.Sort[S]](name: String, sort: S): Option[Core.Expr[S]] = {
+      sort match {
+        case f: Core.FunSort[t] =>
+          None // Functions do not have a value, they only have an axiom via asTerm / asNegatedTerm / formula
+        case _ =>
+          val someExpr = evaluate(Core.mkVar(name, sort))
+          someExpr.unify(sort) match {
+            case Some(unifiedExpr) => Some(unifiedExpr)
+            case None => None
+          }
       }
     }
 
@@ -1181,10 +1220,14 @@ object Z3Solver {
       (sorts, constNames)
     }
 
-    override def evaluate[S <: Core.Sort[S]](e: Core.Expr[S]): Core.BoxedExpr = {
+    override def evaluate[S <: Core.Sort[S]](e: Core.Expr[S]): Core.Expr[S] = {
       val term = solver.lower(e)
       val t = model.evaluate(term, enableCompletion)
-      solver.liftTerm(t)
+      val be = solver.liftTerm(t)
+      be.unify(e.sort) match {
+        case Some(ue) => ue
+        case None => unexpected(s"model.evaluate: got term ${be}, which is of not of sort ${e.sort} for ${e}")
+      }
     }
 
     override def asNegatedTerm(): this.solver.LoweredTerm = {
@@ -1230,7 +1273,8 @@ object Z3Solver {
           else {
             val boundVars: IndexedSeq[z3.Expr[z3.Sort]] =
               (0 until arity).map { i =>
-                ctx.mkBound(arity - 1 - i, domainSorts(i))
+                // ctx.mkBound(arity - 1 - i, domainSorts(i))
+                ctx.mkBound(i, domainSorts(i))
               }
 
             val matchClauses: Array[z3.BoolExpr] =
@@ -1251,25 +1295,31 @@ object Z3Solver {
                 val disjunction =
                   if matchClauses.length == 1 then matchClauses.head
                   else ctx.mkOr(matchClauses.toArray *)
-                ctx.mkNot(disjunction).asInstanceOf[z3.BoolExpr]
+                ctx.mkNot(disjunction)
               }
 
             val applied =
-              ctx.mkApp(fv, boundVars.toArray *).asInstanceOf[z3.Expr[z3.Sort]]
+              ctx.mkApp(fv, boundVars.toArray *)
 
             val equality =
-              ctx.mkEq(applied, elseValue).asInstanceOf[z3.BoolExpr]
+              ctx.mkEq(applied, elseValue)
 
             val body =
               if matchClauses.isEmpty then equality
-              else ctx.mkImplies(guard, equality).asInstanceOf[z3.BoolExpr]
+              else ctx.mkImplies(guard, equality)
+
+            // println(s" *** funcInterp parser: matchClauses [ ${matchClauses.mkString(", ")} ]")
+            // println(s" *** funcInterp parser: equality ${equality.toString}")
+            // println(s" *** funcInterp parser: body ***\n${body.toString}\n***")
+
 
             val names = (0 until arity).map(i => ctx.mkSymbol(s"arg_$i").asInstanceOf[com.microsoft.z3.Symbol]).toArray
 
-            ctx.mkForall(domainSorts, names, body, 0, null, null, null, null)
+            val ret = ctx.mkForall(domainSorts, names, body, 0, null, null, null, null)
+            // println(s" *** funcInterp parser: map result ${ret}")
+            ret
           }
         }
-
       val conjuncts = entryEqualities.toList ++ elseClause.toList
 
       conjuncts match {
@@ -1284,32 +1334,32 @@ object Z3Solver {
 
     override def asNegatedTerm(vocab: Set[(String, BoxedSort)]): this.solver.LoweredTerm = {
       val context = solver.getContext
+      val conjunct = asTerm(vocab).asInstanceOf[z3.BoolExpr]
+      context.mkNot(conjunct).asInstanceOf[z3.Expr[z3.Sort]]
+    }
 
-      println("entering asNegatedTerm...")
-
-      println("model: " + model.toString)
-
-
+    override def asTerm(vocab: Set[(String, BoxedSort)]): solver.LoweredTerm = {
+      val context = solver.getContext
       val declEqualities: List[z3.BoolExpr] =
         vocab.map { case (name, sort) =>
-              sort.sort match {
-                case f: Core.FunSort[t] =>
-                  this.solver.lookupDecl(name, sort) match {
-                    case Some(decl) =>
-                      Option(this.model.getFuncInterp(decl)) match {
-                        case Some(funcInterp) =>
-                          funcInterpToAxiom(decl, funcInterp)
-                        case None =>
-                          context.mkTrue()
-                      }
+          sort.sort match {
+            case f: Core.FunSort[t] =>
+              this.solver.lookupDecl(name, sort) match {
+                case Some(decl) =>
+                  Option(this.model.getFuncInterp(decl)) match {
+                    case Some(funcInterp) =>
+                      funcInterpToAxiom(decl, funcInterp)
                     case None =>
-                      failwith(s"error: declaration of ${name} not found in solver object")
+                      context.mkTrue()
                   }
-                case _ =>
-                  val c = context.mkConst(name, solver.lowerSort(sort))
-                  val evaluationResult = model.evaluate(c, enableCompletion)
-                  context.mkEq(c, evaluationResult)
+                case None =>
+                  failwith(s"error: declaration of ${name} not found in solver object")
               }
+            case _ =>
+              val c = context.mkConst(name, solver.lowerSort(sort))
+              val evaluationResult = model.evaluate(c, enableCompletion)
+              context.mkEq(c, evaluationResult)
+          }
         }.toList
 
       val conjunct =
@@ -1317,20 +1367,8 @@ object Z3Solver {
           case Nil => context.mkTrue()
           case _ => context.mkAnd(declEqualities.toArray *)
         }
-      context.mkNot(conjunct).asInstanceOf[z3.Expr[z3.Sort]]
-    }
 
-    override def asTerm(vocabulary: Set[(String, BoxedSort)]): this.solver.LoweredTerm = {
-      val ctx = solver.getContext
-      val equalities =
-        ctx.mkAnd(
-          vocabulary.toList.map(x =>
-            val c = ctx.mkConst(x._1, solver.lowerSort(x._2))
-            val rhs = model.evaluate(c, enableCompletion)
-            ctx.mkEq(c, rhs)
-          ).toArray *
-        )
-      equalities.asInstanceOf[z3.Expr[z3.Sort]]
+      conjunct.asInstanceOf[z3.Expr[z3.Sort]]
     }
 
     override def asTerm(): solver.LoweredTerm = {
@@ -1340,8 +1378,14 @@ object Z3Solver {
           x =>
             (solver.getContext.mkEq(x.apply(), model.getConstInterp(x)))
         ).toArray *)
-      equalities.asInstanceOf[z3.Expr[z3.Sort]]
-
+      val funcDecls = model.getFuncDecls.toList
+      val funcAxioms =
+        funcDecls.map(funcDecl =>
+          val funcInterp = model.getFuncInterp(funcDecl)
+          funcInterpToAxiom(funcDecl.asInstanceOf[FuncDecl[z3.Sort]], funcInterp.asInstanceOf[FuncInterp[z3.Sort]])
+        )
+        
+      solver.getContext.mkAnd((equalities :: funcAxioms).toArray *).asInstanceOf[solver.LoweredTerm]
     }
 
 

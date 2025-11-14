@@ -54,53 +54,90 @@ object SmtInterpolSolver {
 
     override def getHistory: List[String] = history
 
-    private def lowerSortAny(sort: Core.Sort[?]): Sort = sort match
-      case _: Core.BoolSort => solver.sort(SMTLIBConstants.BOOL)
-      case _: Core.NumericSort => solver.sort(SMTLIBConstants.INT)
-      case arr: Core.ArraySort[?, ?] =>
-        solver.sort(SMTLIBConstants.ARRAY, lowerSortAny(arr.domainSort), lowerSortAny(arr.rangeSort))
-      case srt: Core.UnInterpretedSort =>
-        solver.sort(srt.sortName)
-      case alias: Core.AliasSort[?] =>
-        val argSorts = alias.args.map(arg => lowerSortAny(arg.sort)).toArray
-        val underlying = lowerSortAny(alias.underlyingSort)
-        solver.sort(alias.name)
-      case dt: Core.DatatypeConstructorSort =>
-        solver.sort(dt.name)
-      case finite: Core.FiniteUniverseSort =>
-        solver.sort(finite.name)
-      case fun: Core.FunSort[?] => unexpected("cannot lower function sort in SMTInterpol backend", fun)
-
-    private def declareDatatype(sort: Core.DatatypeConstructorSort): Sort =
-      sortMap.getOrElseUpdate(sort.box, {
-        val datatype = solver.datatype(sort.sortName, 0)
-        val constructors = sort.constructors.map { constructor =>
-          val selectorNames = constructor.args.map(_._1).toArray
-          val selectorSorts = constructor.args.map { case (_, argSort) =>
-            if argSort.sort == sort then solver.sort(sort.sortName)
-            else lowerSortAny(argSort.sort)
-          }.toArray
-          solver.constructor(constructor.name, selectorNames, selectorSorts)
+    private def mkDatatypeSort(sort: Core.DatatypeConstructorSort): Sort = {
+      val datatype = solver.datatype(sort.sortName, 0)
+      val constructors = sort.constructors.map { constructor =>
+        val selectorNames = constructor.args.map(_._1).toArray
+        val selectorSorts = constructor.args.map { case (_, argSort) =>
+          if argSort.sort == sort then solver.sort(sort.sortName)
+          else lowerSort(argSort.sort)
         }.toArray
-        solver.declareDatatype(datatype, constructors)
-        solver.sort(sort.sortName)
-      })
+        solver.constructor(constructor.name, selectorNames, selectorSorts)
+      }.toArray
+      solver.declareDatatype(datatype, constructors)
+      solver.sort(sort.sortName)
+    }
 
-    private def declareFinite(sort: Core.FiniteUniverseSort): Sort =
-      sortMap.getOrElseUpdate(sort.box, {
-        val datatype = solver.datatype(sort.sortName, 0)
-        val constructors = (0 until sort.card).map { idx =>
-          solver.constructor(getEnumName(idx, sort), Array.empty[String], Array.empty[Sort])
-        }.toArray
-        solver.declareDatatype(datatype, constructors)
-        solver.sort(sort.sortName)
-      })
+    private def mkFiniteSort(sort: Core.FiniteUniverseSort): Sort = {
+      val datatype = solver.datatype(sort.sortName, 0)
+      val constructors = (0 until sort.card).map { idx =>
+        solver.constructor(getEnumName(idx, sort), Array.empty[String], Array.empty[Sort])
+      }.toArray
+      solver.declareDatatype(datatype, constructors)
+      solver.sort(sort.sortName)
+    }
+      
+
+    private def mkUnInterpretedSort(sort: Core.UnInterpretedSort)  = {
+      solver.declareSort(sort.name, sort.numArgs)
+      solver.sort(sort.sortName)
+    }
+    
+    // API:     public void defineSort(String sort, Sort[] sortParams, Sort definition) throws SMTLIBException 
+    private def mkAliasSort[S <: Core.Sort[S]](aliasSort: AliasSort[S]) = {
+      val aliasName = aliasSort.name
+      val aliasArgs = aliasSort.args
+      val underlyingSort = aliasSort.underlyingSort
+      solver.defineSort(aliasName, aliasArgs.toArray.map(x => lowerSort(x)), lowerSort(underlyingSort))
+      solver.sort(aliasName)
+    }
 
     override def lowerSort[A <: Core.Sort[A]](s: A): Sort =
-      sortMap.getOrElseUpdate(s.box, lowerSortAny(s))
+      sortMap.get(s.box) match {
+        case Some(sort) => sort
+        case None =>
+          s match {
+            case _: Core.BoolSort => solver.sort(SMTLIBConstants.BOOL)
+            case _: Core.NumericSort => solver.sort(SMTLIBConstants.INT)
+            case arr @ Core.ArraySort(domainSort, rangeSort) =>
+              solver.sort(SMTLIBConstants.ARRAY, lowerSort(domainSort), lowerSort(rangeSort))
+            case srt: Core.UnInterpretedSort =>
+              solver.sort(srt.sortName)
+            case alias: Core.AliasSort[t] => unexpected(s"error: ${alias} sort undeclared")
+            case dt: Core.DatatypeConstructorSort => unexpected(s"error: ${dt} sort undeclared")
+            case finite: Core.FiniteUniverseSort => unexpected(s"error: ${finite} sort undeclared")
+            case fun: Core.FunSort[?] => unexpected("cannot lower function sort in SMTInterpol backend", fun)
+          }
+      }
 
     override def defineSort[A <: Core.Sort[A]](s: A): Sort = {
-      val lowered = lowerSort(s)
+      val lowered =
+        sortMap.get(s) match {
+          case Some(loweredSort) => loweredSort
+          case None =>
+            s match {
+              case _: Core.BoolSort => lowerSort(s)
+              case _: Core.NumericSort => lowerSort(s)
+              case _: Core.ArraySort[x,y] => lowerSort(s)
+              case uSort: Core.UnInterpretedSort =>
+                val loweredSort = mkUnInterpretedSort(uSort)
+                sortMap.update(uSort, loweredSort)
+                loweredSort
+              case aliasSort @ Core.AliasSort(_, _, _) =>
+                val loweredSort = mkAliasSort(aliasSort)
+                sortMap.update(aliasSort, loweredSort)
+                loweredSort
+              case dt: Core.DatatypeConstructorSort =>
+                val loweredSort = mkDatatypeSort(dt)
+                sortMap.update(dt, loweredSort)
+                loweredSort
+              case finite: Core.FiniteUniverseSort =>
+                val loweredSort = mkFiniteSort(finite)
+                sortMap.update(finite, loweredSort)
+                loweredSort
+              case fun: Core.FunSort[?] => unexpected(s"cannot define function sort in SMTInterpol backend: ${fun}")
+            }
+        }
       record(s"defineSort(${s.sortName})")
       lowered
     }
@@ -111,18 +148,22 @@ object SmtInterpolSolver {
       lowered
     }
 
-    private def ensureFunction(name: String, domain: List[Core.BoxedSort], range: Core.Sort[?]): FunctionSymbol =
-      funMap.getOrElseUpdate(name, {
-        val domainSorts = domain.map(arg => lowerSortAny(arg.sort)).toArray
-        val rangeSort = lowerSortAny(range)
-        solver.declareFun(name, domainSorts, rangeSort)
-        solver.getFunctionSymbol(name)
-      })
+    private def mkFunction[S <: Core.Sort[S]](name: String, domain: List[Core.BoxedSort], range: S): FunctionSymbol =
+      funMap.get(name) match {
+        case Some(funcDef) => funcDef
+        case None => 
+          val domainSorts = domain.map(arg => lowerSort(arg.sort)).toArray
+          val rangeSort = lowerSort(range)
+          solver.declareFun(name, domainSorts, rangeSort)
+          val fs = solver.getFunctionSymbol(name)
+          funMap.update(name, fs)
+          fs
+      }
 
     override def declareVar[S <: Core.Sort[S]](name: String, sort: S): FunctionSymbol =
       sort match
-        case funSort: Core.FunSort[t] @unchecked =>
-          ensureFunction(name, funSort.domainSort, funSort.rangeSort)
+        case funSort @ Core.FunSort(domainSort, rangeSort) =>
+          mkFunction(name, funSort.domainSort, rangeSort)
         case _ =>
           funMap.getOrElseUpdate(name, {
             val lowered = lowerSort(sort)
@@ -133,25 +174,45 @@ object SmtInterpolSolver {
     override def defineVar[S <: Core.Sort[S]](name: String, sort: S, expr: Core.Expr[S]): (FunctionSymbol, List[Term]) = {
       val decl = declareVar(name, sort)
       val axioms = sort match
-        case funSort: Core.FunSort[t] @unchecked =>
+        case funSort @ Core.FunSort(_, _) =>
           expr match
             case Core.Macro(_, args, body) =>
               val argVars = args.map { case (argName, argSort) =>
-                solver.variable(argName, lowerSortAny(argSort.sort))
+                solver.variable(argName, lowerSort(argSort.sort))
               }
               val bound = args.map(_._1).zip(argVars).toMap
               val bodyTerm = lower(bound, body)
               val retSort = lowerSort(body.sort)
               solver.defineFun(name, argVars.toArray, retSort, bodyTerm)
               funMap.update(name, solver.getFunctionSymbol(name))
-              Nil
+              List()
+            case Var(_, _) =>
+              // When expr is a Var (uninterpreted or alias), no axiom needed
+              List()
             case _ =>
-              val symbolTerm = solver.term(name)
-              val lowered = lower(expr)
-              val equality = solver.term(SMTLIBConstants.EQUALS, symbolTerm, lowered)
-              solver.assertTerm(equality)
-              axiomsMap.update(name, equality)
-              List(equality)
+              // For other function expressions, generate: forall args, name(args) = expr(args)
+              val domainSorts = funSort.domainSort
+              val rangeSort = funSort.rangeSort
+
+              // Create fresh argument variables for the forall
+              val args: List[(String, Core.BoxedSort)] =
+                domainSorts.zipWithIndex.map { case (sort, idx) =>
+                  (s"x$idx", sort)
+                }
+
+              // Build forall axiom: forall args, name(args) = expr(args)
+              val forallAxiom = Core.mkForall(
+                args,
+                Core.mkEq(
+                  Core.mkSubst("app", args.map(x => (x._1, Core.mkVar(x._1, x._2))), Core.mkVar(name, funSort)),
+                  Core.mkSubst("app", args.map(x => (x._1, Core.mkVar(x._1, x._2))), expr)
+                )
+              )
+
+              val loweredAxiom = lower(forallAxiom)
+              solver.assertTerm(loweredAxiom)
+              axiomsMap.update(name, loweredAxiom)
+              List(loweredAxiom)
         case _ =>
           val symbolTerm = solver.term(name)
           val lowered = lower(expr)
@@ -217,10 +278,10 @@ object SmtInterpolSolver {
           val loweredArgs = args.map(arg => lower(bound, arg))
           solver.term(SMTLIBConstants.MUL, loweredArgs *)
         case Core.Forall(sortedArgs, body) =>
-          val (vars, newBound) = instantiateBinders(bound, sortedArgs)
+          val (vars, newBound) = wrapBinders(bound, sortedArgs)
           solver.quantifier(Script.FORALL, vars.toArray, lower(newBound, body), Array[Term]())
         case Core.Exists(sortedArgs, body) =>
-          val (vars, newBound) = instantiateBinders(bound, sortedArgs)
+          val (vars, newBound) = wrapBinders(bound, sortedArgs)
           solver.quantifier(Script.EXISTS, vars.toArray, lower(newBound, body), Array[Term]())
         case Core.Substitute("let", _, Core.Macro("letBody", _, _)) =>
           val eliminated = (new LetRemover()).visit(Core.emptyInterpEnv)(expr)
@@ -229,7 +290,6 @@ object SmtInterpolSolver {
           val bindingsEnv = bindings.toEnv
           bodyExpr match
             case Core.Macro(name, args, _) =>
-              ensureFunction(name, args.map(_._2), bodyExpr.sort)
               val concreteArgs = args.map { case (argName, _) =>
                 bindingsEnv(argName) match
                   case Some(boundExpr) => lower(bound, boundExpr.e)
@@ -237,17 +297,17 @@ object SmtInterpolSolver {
               }
               solver.term(name, concreteArgs *)
             case Core.Var(name, _) =>
-              declareVar(name, bodyExpr.sort)
               val concreteArgs = bindings.map(_._2.e).map(arg => lower(bound, arg))
               solver.term(name, concreteArgs *)
             case other => unexpected("cannot apply non-function expression in SMTInterpol backend", other)
         case other =>
           unsupported(s"lower: unsupported SMTInterpol expression $other")
 
-    private def instantiateBinders(bound: Map[String, TermVariable],
+    
+    private def wrapBinders(bound: Map[String, TermVariable],
                                    binders: List[(String, Core.BoxedSort)]): (List[TermVariable], Map[String, TermVariable]) = {
       val generated = binders.map { case (name, sort) =>
-        val lowered = lowerSortAny(sort.sort)
+        val lowered = lowerSort(sort.sort)
         val termVar = solver.variable(name, lowered)
         (name, termVar)
       }
@@ -529,13 +589,16 @@ object SmtInterpolSolver {
     }
 
     override def lookupDecl[S <: Core.Sort[S]](v: String, s: S): Option[LoweredVarDecl] = {
-      try Some(funMap(v)) catch case _ => None 
+      try
+        Some(funMap(v))
+      catch
+        case _ => None
     }
 
     override def initialize(logicOptions: SmtSolver.Logic): Unit = {
       val targetLogic = Logics.ALL // TODO
       val targetLogicName = targetLogic.toString
-      solver.reset
+      solver.reset()
       solver.setOption(":produce-proofs", true)
       solver.setOption(":produce-models", true)
       solver.setLogic(targetLogicName)
@@ -650,10 +713,13 @@ object SmtInterpolSolver {
       (sorts, constNames)
     }
 
-    override def evaluate[S <: Core.Sort[S]](expr: Core.Expr[S]): Core.BoxedExpr = {
+    override def evaluate[S <: Core.Sort[S]](expr: Core.Expr[S]): Core.Expr[S] = {
       val term = solver.lower(expr)
       val evaluatedTerm = model.evaluate(term)
-      solver.liftTerm(evaluatedTerm)
+      solver.liftTerm(evaluatedTerm).unify(expr.sort) match {
+        case Some(unified) => unified
+        case None => unexpected(s"model evaluator in SmtInterpolSolver: got term ${evaluatedTerm} but it is not of sort ${expr.sort}")
+      }
     }
 
     override def asNegatedTerm(): Term = {
@@ -731,9 +797,18 @@ object SmtInterpolSolver {
 
     override def asTerm(vocabulary: Set[(String, BoxedSort)]): Term = {
       val equalities = vocabulary.map { case (name, sort) =>
-        val c = solver.getSolver.term(name)
-        val value = model.evaluate(c)
-        solver.getSolver.term(SMTLIBConstants.EQUALS, c, value)
+        println(s"asTerm: enumerating ${name} : ${sort} ...")
+
+        sort.sort match {
+          case fs: Core.FunSort[t] =>
+            val funcSym = solver.lookupDecl(name, sort).get
+            val t = this.termOfSymbol(funcSym).get
+            t
+          case _ =>
+            val c = solver.getSolver.term(name)
+            val value = model.evaluate(c)
+            solver.getSolver.term(SMTLIBConstants.EQUALS, c, value)
+        }
       }.toList
 
       equalities match {

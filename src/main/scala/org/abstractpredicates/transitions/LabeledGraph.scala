@@ -11,7 +11,8 @@ import cats.implicits.*
 class LabeledGraph[NodeLabel, EdgeLabel] {
 
   type Vertex = Int 
-  
+  type Edge = (Vertex, EdgeLabel, Vertex)
+    
   private var numNodes = 0
   private var numEdges = 0
 
@@ -37,13 +38,19 @@ class LabeledGraph[NodeLabel, EdgeLabel] {
   def addEdge(from: Vertex, to: Vertex, label: EdgeLabel): Option[(Vertex, EdgeLabel, Vertex)] = {
     (nodeLabel.get(from), nodeLabel.get(to)).tupled match {
       case Some(_, _) =>
-        if sourceNodes.contains(to) then sourceNodes.remove(to)
-        if sinkNodes.contains(from) then sinkNodes.remove(from)
-        nodeList.update(from, nodeList.getOrElse(from, MS()) + to)
-        reverseNodeList.update(to, reverseNodeList.getOrElse(to, MS()) + from)
-        edgeList += ((from, label, to))
-        edgeLabel.update((from, to), label)
-        Some(from, label, to)
+        // FIXED: Check if edge already exists before adding
+        val edge = (from, label, to)
+        if (edgeList.contains(edge)) {
+          None  // Edge already exists, return None to signal no change
+        } else {
+          if sourceNodes.contains(to) then sourceNodes.remove(to)
+          if sinkNodes.contains(from) then sinkNodes.remove(from)
+          nodeList.update(from, nodeList.getOrElse(from, MS()) + to)
+          reverseNodeList.update(to, reverseNodeList.getOrElse(to, MS()) + from)
+          edgeList += edge
+          edgeLabel.update((from, to), label)
+          Some(edge)
+        }
       case None => None
     }
   }
