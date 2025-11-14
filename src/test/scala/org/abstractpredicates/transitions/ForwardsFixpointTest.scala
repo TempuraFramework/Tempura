@@ -4,6 +4,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.helpers.Utils.*
 import org.abstractpredicates.expression.Syntax.*
+import org.abstractpredicates.helpers.{DotPrinter, FormulaPrinter}
 import org.abstractpredicates.smt.SmtSolver.*
 import org.abstractpredicates.smt.{SmtSolver, Z3Solver}
 
@@ -72,10 +73,10 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val typeEnv = Core.emptyTypeEnv
     val interpEnv = Core.emptyInterpEnv
 
-    val b0 = interpEnv.newVar("b0", Core.BoolSort())
-    val b1 = interpEnv.newVar("b1", Core.BoolSort())
-    val next_b0 = interpEnv.newVar("next_b0", Core.BoolSort())
-    val next_b1 = interpEnv.newVar("next_b1", Core.BoolSort())
+    val b0 = interpEnv |- ("b0", Core.BoolSort())
+    val b1 = interpEnv |- ("b1", Core.BoolSort())
+    val next_b0 = interpEnv |- ("next_b0", Core.BoolSort())
+    val next_b1 = interpEnv |- ("next_b1", Core.BoolSort())
 
     val timedVar0 = TimedVariable("b0", "next_b0", 0, Core.BoolSort())
     val timedVar1 = TimedVariable("b1", "next_b1", 0, Core.BoolSort())
@@ -176,7 +177,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val (trs, solver) = createToggleSystem()
     val fixpoint = ForwardsFixpoint(trs, solver, List())
 
-    fixpoint.setMaxSteps(10)
+    fixpoint.setMaxSteps(100000)
     val graph = fixpoint.run()
 
     val stats = fixpoint.getStatistics
@@ -188,13 +189,27 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
     // Should have 2 edges (forming a cycle)
     assert(stats.totalEdges == 2, s"Expected 2 edges, got ${stats.totalEdges}")
+
+    val graph0 = fixpoint.getStateGraph
+    val graphPrinter =
+      DotPrinter.Printer(graph, true,
+        (x => DotPrinter.defaultNodeConfig), (e => DotPrinter.defaultEdgeConfig),
+        Some(x =>
+          s"${x}: ${graph.labelOf(x).toString}"
+        ),
+        Some(e =>
+          s"${FormulaPrinter.ExprPrinter(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))()}"
+        ))
+
+    graphPrinter.visualizeDOT(None, true)
+
   }
 
   test("counter system: reachable states") {
     val (trs, solver) = createCounterSystem()
     val fixpoint = ForwardsFixpoint(trs, solver, List())
 
-    fixpoint.setMaxSteps(20)
+    fixpoint.setMaxSteps(200000)
     val graph = fixpoint.run()
 
     val stats = fixpoint.getStatistics
@@ -206,19 +221,50 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
     // Should have 4 edges (forming a cycle)
     assert(stats.totalEdges == 4, s"Expected 4 edges, got ${stats.totalEdges}")
+
+    val graph0 = fixpoint.getStateGraph
+    val graphPrinter =
+      DotPrinter.Printer(graph, true,
+        (x => DotPrinter.defaultNodeConfig), (e => DotPrinter.defaultEdgeConfig),
+        Some(x =>
+          s"${x}: ${graph.labelOf(x).toString}"
+        ),
+        Some(e =>
+          s"${FormulaPrinter.ExprPrinter(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))()}"
+        ))
+
+    graphPrinter.visualizeDOT(None, true)
+
+    // Should have exactly 4 states (all states can reach the live state due to cycle)
+    assert(stats.totalStates == 4, s"Expected 4 states, got ${stats.totalStates}")
+
   }
 
   test("mutex system: invariant holds") {
     val (trs, solver, mutexProperty) = createMutexSystem()
     val fixpoint = ForwardsFixpoint(trs, solver, List())
 
-    fixpoint.setMaxSteps(20)
-    fixpoint.run()
+    fixpoint.setMaxSteps(20000)
+    val graph = fixpoint.run()
 
     // Check that mutual exclusion holds in all reachable states
     val invariantHolds = fixpoint.checkInvariant(mutexProperty)
 
     assert(invariantHolds, "Mutual exclusion invariant should hold")
+    val graph0 = fixpoint.getStateGraph
+    val graphPrinter =
+      DotPrinter.Printer(graph, true,
+        (x => DotPrinter.defaultNodeConfig), (e => DotPrinter.defaultEdgeConfig),
+        Some(x =>
+          s"${x}: ${graph.labelOf(x).toString}"
+        ),
+        Some(e =>
+          s"${FormulaPrinter.ExprPrinter(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))()}"
+        ))
+
+    graphPrinter.visualizeDOT(None, true)
+
+
   }
 
   test("mutex system: reachable states") {

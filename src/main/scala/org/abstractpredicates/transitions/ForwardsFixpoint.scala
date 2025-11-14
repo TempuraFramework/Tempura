@@ -228,8 +228,10 @@ class ForwardsFixpoint(val trs: TransitionSystem,
         val origName = tvar.getOriginalName
         val sort = tvar.getSort
 
+
         model.valueOf(nextName, sort.sort) match {
           case Some(value) =>
+            println(s"  *** getting next-state value for ${origName} : ${value.toString}")
             Some(Core.mkEq(Core.mkVar(origName, sort), value))
           case None =>
             // fall back to current value if next-state missing
@@ -242,6 +244,8 @@ class ForwardsFixpoint(val trs: TransitionSystem,
     val summary =
       if nextAssignments.isEmpty then Core.mkTrue
       else Core.mkAnd(nextAssignments)
+
+    println(s" ** summary: ${summary.toString}")
 
     val forked = solverEnv.solver.fork()
     ignore(forked.add(List(summary)))

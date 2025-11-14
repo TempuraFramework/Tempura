@@ -959,5 +959,6 @@ object Core {
   given aConversion[D <: Sort[D], R <: Sort[R]]: Conversion[(Expr[R], ArraySort[D, R]), SortValue.ArrayValue[D, R]] with
     def apply(e: (Expr[R], ArraySort[D, R])) = SortValue.ArrayValue(e._1, e._2)
 
+  given boxedSortConversion[S <: Core.Sort[S]]: Conversion[BoxedSort {type T = S}, S] with
 
 } 

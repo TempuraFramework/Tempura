@@ -252,7 +252,7 @@ object Z3Solver {
     // storing their index.
     private def lower[S <: Core.Sort[S]](boundVars: Map[String, LoweredVarDecl])(expr: Core.Expr[S]): LoweredTerm =
       expr match {
-        case Var(n, sort) => // XXX TODO: how do we handle functions?????
+        case Var(n, sort) =>
           val z3Sort = lowerSort(sort)
           testBoundVarName(n) match { // for lambda bound variables
             case Some(idx) =>
@@ -592,7 +592,8 @@ object Z3Solver {
             case None =>
               unexpected(s"liftTerm: failed to unify lambda body ${bodyT} with return sort ${retSortT}")
           }
-
+        case _ if expr.isTrue => Core.mkTrue
+        case _ if expr.isFalse => Core.mkFalse
         // XXX: variables and constants are both Constants to Z3, so we distinguish them in `case _`.
         // case handling variables as terms, notice Const in Z3 = Vars in our framework
         // case _ if expr.isConst =>
