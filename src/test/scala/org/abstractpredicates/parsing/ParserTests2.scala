@@ -1,7 +1,7 @@
 package org.abstractpredicates.parsing
 
 import org.abstractpredicates.parsing.io.TransitionSystemReader
-import org.abstractpredicates.parsing.parsers.StringToSExprParser
+import org.abstractpredicates.parsing.sexpr.StringToSExprParser
 import org.scalatest.funsuite.AnyFunSuite
 
 class ParserTests2 extends AnyFunSuite {

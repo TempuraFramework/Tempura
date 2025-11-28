@@ -312,6 +312,8 @@ object Core {
     case NumericValue(n: Int) extends SortValue[NumericSort](NumericSort())
     case ArrayValue[D <: Sort[D], R <: Sort[R]](default: Expr[R], s: ArraySort[D, R])
       extends SortValue[ArraySort[D, R]](s)
+    case FunctionValue[R <: Sort[R]](default: Macro[R])
+      extends SortValue[FunSort[R]](default.sort)
     case FiniteUniverseValue(idx: Int, s: FiniteUniverseSort) extends SortValue[FiniteUniverseSort](s)
     case UnInterpretedValue(name: String, s: UnInterpretedSort) extends SortValue[UnInterpretedSort](s)
     case AliasSortValue[X <: Sort[X]](name: String, s: AliasSort[X]) extends SortValue[AliasSort[X]](s)
@@ -676,7 +678,7 @@ object Core {
     override def equals(obj: Any): Boolean = {
       obj match {
         case be: BoxedExpr => equals(be.e)
-        case c @ Const(_) => c.sortValue == this.sortValue
+        case c@Const(_) => c.sortValue == this.sortValue
         case _ => false
       }
     }
@@ -770,6 +772,37 @@ object Core {
     }
   }
 
+  //
+  // Generating ground constants for sorts
+  //
+
+  def groundConstantsOfSort[S <: Sort[S]](sort: S): Option[List[SortValue[S]]] = ??? // TODO
+  /*{
+    sort match {
+      case BoolSort() =>
+        Some(List(SortValue.BoolValue(true), SortValue.BoolValue(false)))
+      case arrSort@ArraySort(_, rangeSort) =>
+        groundConstantsOfSort(rangeSort) match {
+          case Some(l) => SortValue.ArrayValue(mkConst(l), arrSort)
+          case None => None
+        }
+      case f@FiniteUniverseSort(name, card) =>
+        Some((0 until card).map(idx => SortValue.FiniteUniverseValue(idx, f)).toList)
+      case f@FunSort(domainSort, rangeSort) =>
+        groundConstantsOfSort(rangeSort) match {
+          case Some(rangeValues) =>
+            /*Some(rangeValues.map(rangeValue =>
+              SortValue.FunctionValue(Core.mkMacro("lambda",
+                domainSort.zipWithIndex.map((x: (BoxedSort, Int)) => (s"arg_${x._1}", x._2.sort)),
+                Core.mkConst(rangeValue)
+              )
+              )))*/
+            ???
+          case None => None
+          case _ => None
+        }
+    }
+  }*/
 
   //
   // Methods for helping create expressions
@@ -786,6 +819,9 @@ object Core {
 
   def mkVar[X <: Sort[X]](name: String, sort: X): Expr[X] =
     Core.Var(name, sort)
+
+  def mkVar(name: String, sort: BoxedSort): Var[sort.S] =
+    Core.Var(name, sort.sort)
 
   def mkSelect[X <: Sort[X], Y <: Sort[Y]](arr: Expr[ArraySort[X, Y]], index: Expr[X]): Expr[Y] =
     Core.ArraySelect[X, Y](arr, index)(using arr.sort.domainSort, arr.sort.rangeSort)
@@ -899,6 +935,12 @@ object Core {
       macroExpr
     )
 
+  def mkGlobally(body: Expr[BoolSort]): Expr[BoolSort] =
+    Core.mkUop("globally",  body, Core.BoolSort())
+  
+  def mkEventually(body: Expr[BoolSort]): Expr[BoolSort] =
+    Core.mkUop("eventually", body, Core.BoolSort())
+  
   //
   // (Experimental and Z3-only)
   // Cardinality constraints
@@ -958,7 +1000,5 @@ object Core {
 
   given aConversion[D <: Sort[D], R <: Sort[R]]: Conversion[(Expr[R], ArraySort[D, R]), SortValue.ArrayValue[D, R]] with
     def apply(e: (Expr[R], ArraySort[D, R])) = SortValue.ArrayValue(e._1, e._2)
-
-  given boxedSortConversion[S <: Core.Sort[S]]: Conversion[BoxedSort {type T = S}, S] with
 
 } 

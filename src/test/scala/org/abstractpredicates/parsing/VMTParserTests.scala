@@ -1,8 +1,7 @@
 package org.abstractpredicates.parsing
 
 import org.abstractpredicates.expression.Core
-import org.abstractpredicates.parsing.ast.{ParseTree, VMTParser}
-import org.abstractpredicates.parsing.parsers.StringToSExprParser
+import org.abstractpredicates.parsing.sexpr.{ParseTree, StringToSExprParser, VMTParser}
 import org.abstractpredicates.transitions.PreTransitionSystem
 import org.scalatest.funsuite.AnyFunSuite
 

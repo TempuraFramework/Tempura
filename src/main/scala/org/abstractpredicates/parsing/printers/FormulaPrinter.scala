@@ -1,4 +1,4 @@
-package org.abstractpredicates.helpers
+package org.abstractpredicates.parsing.printers
 
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.smt.SmtLibSolver

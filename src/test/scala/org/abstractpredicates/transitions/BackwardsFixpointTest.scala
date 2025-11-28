@@ -3,8 +3,8 @@ package org.abstractpredicates.transitions
 import org.scalatest.funsuite.AnyFunSuite
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.expression.Syntax.*
-import org.abstractpredicates.helpers.{DotPrinter, FormulaPrinter}
 import org.abstractpredicates.helpers.Utils.*
+import org.abstractpredicates.parsing.printers.{DotPrinter, FormulaPrinter}
 import org.abstractpredicates.smt.SmtSolver.*
 import org.abstractpredicates.smt.{SmtSolver, Z3Solver}
 

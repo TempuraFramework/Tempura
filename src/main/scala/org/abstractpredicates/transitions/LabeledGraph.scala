@@ -89,6 +89,7 @@ class LabeledGraph[NodeLabel, EdgeLabel] {
     if reverseNodeList(to).isEmpty then sinkNodes += to
   }
 
+  def hasEdge(from: Vertex, to: Vertex): Boolean = edgeLabel.contains((from, to))
   def labelOf(node: Vertex) : Option[NodeLabel] = nodeLabel.get(node)
   def labelOf(from: Vertex, to: Vertex): Option[EdgeLabel] = edgeLabel.get((from, to))
   def successors(from: Vertex): Option[MS[Vertex]] = nodeList.get(from)

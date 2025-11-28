@@ -1,10 +1,9 @@
 package org.abstractpredicates.parsing.io
 
 import scala.io.Source
-import org.abstractpredicates.parsing.ast.{ParseTree, VMTParser}
-import org.abstractpredicates.parsing.parsers.StringToSExprParser
+import org.abstractpredicates.parsing.sexpr.{ParseTree, StringToSExprParser, VMTParser}
 import org.abstractpredicates.transitions.PreTransitionSystem
-
+import org.abstractpredicates.expression.Core
 import scala.util.Using
 import cats.implicits.*
 
@@ -28,11 +27,7 @@ class TransitionSystemReader(path: String) {
   def readSexpr: Either[String, List[ParseTree]] = {
     this.readString match {
       case Right(inputString) =>
-        StringToSExprParser.setInput(inputString)
-        StringToSExprParser.transformInput match {
-          case Some(t) => Right(t)
-          case None => Left("readSexpr: Failed to parse S-expressions from input string.")
-        }
+        StringToSExprParser(inputString)
       case Left(reason) => Left(reason)
     }
   }
@@ -44,7 +39,7 @@ class TransitionSystemReader(path: String) {
         sexprs.traverse(
           sexpr =>
             println("\nparsing sexpr: " + sexpr.toString)
-            VMTParser.parse(pts)(sexpr) match {
+            VMTParser.parse(Core.emptyTypeEnv, Core.emptyInterpEnv)(pts)(sexpr) match {
               case Right(answer) => println(" ... [ok]\n"); Right(answer)
               case Left(reason) => println(" ... [failure]\n"); Left(reason)
             }

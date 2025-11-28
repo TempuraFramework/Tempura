@@ -1,7 +1,6 @@
 package org.abstractpredicates.parsing
 
-import org.abstractpredicates.parsing.ast.{ParseTree, ParseValue}
-import org.abstractpredicates.parsing.parsers.StringToSExprParser
+import org.abstractpredicates.parsing.sexpr.{ParseTree, ParseValue, StringToSExprParser}
 import org.scalacheck.{Gen, Prop, Properties}
 import org.scalacheck.Prop.{forAll, forAllNoShrink}
 

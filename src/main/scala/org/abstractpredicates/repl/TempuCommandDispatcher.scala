@@ -1,6 +1,6 @@
 package org.abstractpredicates.repl
 
-import org.abstractpredicates.parsing.ast.ParseTree
+import org.abstractpredicates.parsing.sexpr.ParseTree
 import org.abstractpredicates.repl.CommonCommands.StatefulCommand
 import org.abstractpredicates.repl.TempuCommandResult.*
 

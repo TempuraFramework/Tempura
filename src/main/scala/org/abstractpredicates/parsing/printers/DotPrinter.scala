@@ -1,11 +1,13 @@
-package org.abstractpredicates.helpers
+package org.abstractpredicates.parsing.printers
 
+import org.abstractpredicates.expression.Core.{InterpEnv, TypeEnv}
+import org.abstractpredicates.helpers.{TempuraTransform, Utils}
 import org.abstractpredicates.helpers.Utils.OS.{Linux, Mac, Unknown}
 import org.abstractpredicates.helpers.Utils.unexpected
 import org.abstractpredicates.transitions.LabeledGraph
 
-import java.nio.file.{Files, Paths, Path}
 import java.io.{File, PrintWriter}
+import java.nio.file.{Files, Path, Paths}
 import scala.sys.process.*
 
 
@@ -50,7 +52,7 @@ object DotPrinter {
                                            nodeConfig: graph.Vertex => NodeConfig,
                                            edgeConfig: graph.Edge => EdgeConfig,
                                            nodePrinter: Option[graph.Vertex => String] = None,
-                                           edgePrinter: Option[graph.Edge => String] = None) {
+                                           edgePrinter: Option[graph.Edge => String] = None) extends TempuraTransform[LabeledGraph[NodeLabel, EdgeLabel], String] {
 
     private final val dotPreamble =
       (if isDirected then "strict digraph {\n" else "strict graph {\n")
@@ -65,7 +67,7 @@ object DotPrinter {
             s"${x.toString} [shape=${nodeConfig(x).nodeShape}, color=${nodeConfig(x).nodeColor} ${nodePrinter.map(l => "label=\"" + l(x)).getOrElse("") + "\""} ${nodeConfig(x).nodeStyle.map(s => s", style=$s").getOrElse("")}]")
           .mkString("\n") +
         "\n" + /* Individual edges list */
-        edges.map(e => s"${e._1.toString} -> ${e._3.toString} [color=${edgeConfig(e).edgeColor}, style=${edgeConfig(e).edgeStyle} ${edgePrinter.map(l => "label=\"" + l(e)).getOrElse("") + "\""}]")
+        edges.map(e => s"${e._1.toString} -> ${e._3.toString} [color=${edgeConfig(e).edgeColor}, style=${edgeConfig(e).edgeStyle} ${edgePrinter.map(l => ", label=\"" + l(e) + "\"").getOrElse("") + " "}]")
           .mkString("\n") +
         dotPostamble
       dot
@@ -105,30 +107,60 @@ object DotPrinter {
       pdfFile
     }
 
-    /** Opens the PDF based on OS + Environment. */
+    /**
+     * Opens the PDF using the first available PDF viewer.
+     * On Linux, checks for installed viewers in preference order.
+     * On macOS, uses the system `open` command.
+     */
     private def openPdf(path: Path): Unit = {
       Utils.getOS match {
         case Mac =>
           Seq("open", path.toString).!
 
         case Linux =>
-          Utils.getLinuxDesktop match {
-            case Some("kde") =>
-              // Okular is default for KDE
-              Seq("okular", path.toString).!
-
-            case Some("gnome") =>
-              // GNOME default viewer is `evince`
-              Seq("evince", path.toString).!
-            case _ =>
-              // fallback if unknown Linux desktop
-              println(s"[warn] Unknown desktop environment, falling back to xdg-open.")
+          // Check for installed PDF viewers in preference order
+          findFirstAvailableViewer() match {
+            case Some(viewer) =>
+              Seq(viewer, path.toString).!
+            case None =>
+              // Ultimate fallback: xdg-open (should always work on Linux)
+              println(s"[warn] No known PDF viewer found, using xdg-open.")
               Seq("xdg-open", path.toString).!
           }
+
         case Unknown(os) =>
-          println(s"[warn] Unsupported OS ${os}; cannot open PDF automatically: $path")
+          println(s"[warn] Unsupported OS '${os}'; cannot open PDF automatically: $path")
       }
     }
 
+    /**
+     * Find the first available PDF viewer from a list of known viewers.
+     * Checks in preference order: okular, evince, atril, qpdfview, mupdf, xpdf.
+     * Uses `which` to test if each viewer is installed and executable.
+     */
+    private def findFirstAvailableViewer(): Option[String] = {
+      val pdfViewers = List(
+        "okular",      // KDE default
+        "evince",      // GNOME default
+        "atril",       // MATE default
+        "qpdfview",    // Lightweight Qt viewer
+        "mupdf",       // Minimal viewer
+        "xpdf"         // Classic X11 viewer
+      )
+
+      pdfViewers.find { viewer =>
+        try {
+          // Check if viewer is in PATH using `which`
+          val exitCode = Seq("which", viewer).!
+          exitCode == 0
+        } catch {
+          case _: Exception => false
+        }
+      }
+    }
+
+    override def apply(typeEnv: TypeEnv, interpEnv: InterpEnv)(a: LabeledGraph[NodeLabel, EdgeLabel]): Either[String, String] = {
+      Right(this.dotString)
+    }
   }
 }

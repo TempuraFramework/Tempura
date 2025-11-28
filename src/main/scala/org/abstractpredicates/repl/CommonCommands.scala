@@ -2,9 +2,8 @@ package org.abstractpredicates.repl
 
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.expression.Core.{InterpEnv, TypeEnv}
-import org.abstractpredicates.parsing.ast.{ParseTree, ParseValue, VMTParser}
-import org.abstractpredicates.parsing.ast.ParseTree.{INode, Leaf}
-import org.abstractpredicates.parsing.parsers.StringToSExprParser
+import org.abstractpredicates.parsing.sexpr.{ParseTree, ParseValue, StringToSExprParser, VMTParser, SmtlibParser}
+import org.abstractpredicates.parsing.sexpr.ParseTree.{INode, Leaf}
 import org.abstractpredicates.repl.TempuCommandResult.{TempuCommandResultExit, TempuCommandResultFailure, TempuCommandResultSuccess}
 import org.abstractpredicates.smt.Z3Solver
 import org.abstractpredicates.transitions.*
@@ -95,7 +94,7 @@ object CommonCommands {
     override def apply(args: ParseTree*): TempuCommandResult = {
       args.toList match {
         case List(f) =>
-          VMTParser.translateFormula(Core.emptyTypeEnv, Core.emptyInterpEnv)(f) match {
+          SmtlibParser.parseFormula(Core.emptyTypeEnv, Core.emptyInterpEnv)(f) match {
             case Right(boxedExpr) =>
               TempuCommandResultSuccess(s"Expression: ${boxedExpr.e} Sort: ${boxedExpr.sort}")
             case Left(err, p) =>
@@ -146,11 +145,11 @@ object CommonCommands {
     }
 
     private def invokeZ3(fmla: ParseTree, doAdd: Boolean) = {
-      VMTParser.translateFormula(pts.getTypeEnv, pts.getInterpEnv)(fmla) match {
+      SmtlibParser.parseFormula(pts.getTypeEnv, pts.getInterpEnv)(fmla) match {
         case Right(fmlaT) =>
-          val fmlaZ3 = solver.lower(fmlaT) 
+          val fmlaZ3 = solver.lower(fmlaT)
           if (doAdd) {
-            solver.addTerms(List(fmlaZ3)) 
+            solver.addTerms(List(fmlaZ3))
             TempuCommandResultSuccess(s"Added Z3 formula: ${fmlaZ3.toString}")
           } else {
             TempuCommandResultSuccess(s"Lowered Z3 formula: ${fmlaZ3.toString}")
@@ -168,7 +167,7 @@ object CommonCommands {
           TempuCommandResultSuccess("Successfully cleared VMT parser state.")
         case List(Leaf(ParseValue.PTerm("parse")), term) =>
           // call VMT parser and interpret the results.
-          val result = VMTParser.parse(pts)(term)
+          val result = VMTParser.parse(Core.emptyTypeEnv, Core.emptyInterpEnv)(pts)(term)
           result match {
             case Right(_) =>
               TempuCommandResultSuccess("Successfully parsed VMT statement. \n" + showOutput())
@@ -195,28 +194,28 @@ object CommonCommands {
         case List(Leaf(ParseValue.PTerm("declare-sort-z3")), Leaf(ParseValue.PTerm(name))) =>
           val ns = Core.UnInterpretedSort(name, 0)
           pts.getTypeEnv.add(name, ns)
-          val z3sort = solver.defineSort(ns) 
+          val z3sort = solver.defineSort(ns)
           TempuCommandResultSuccess(s"Successfully declared sort ${name} in Z3: ${z3sort.toString}")
         case List(Leaf(ParseValue.PTerm("declare-finite-sort-z3")), Leaf(ParseValue.PTerm(name)), Leaf(ParseValue.PNumber(size))) =>
           val ns = Core.FiniteUniverseSort(name, size)
           pts.getTypeEnv.add(name, ns)
-          val z3sort = solver.defineSort(ns) 
+          val z3sort = solver.defineSort(ns)
           TempuCommandResultSuccess(s"Successfully declared sort ${name} in Z3: ${z3sort.toString}")
         case List(Leaf(ParseValue.PTerm("declare-var-z3")), Leaf(ParseValue.PTerm(varName)), sortExpr) =>
-          VMTParser.translateSort(pts.getTypeEnv)(sortExpr) match {
+          SmtlibParser.parseSort(pts.getTypeEnv)(sortExpr) match {
             case Right(sort) =>
               pts.getInterpEnv.add(varName, Core.mkVar(varName, sort))
-              val z3var = solver.declareVar(varName, sort) 
+              val z3var = solver.declareVar(varName, sort)
               TempuCommandResultSuccess(s"Successfully declared variable ${varName} in Z3: ${z3var.toString}")
             case Left(reason) => TempuCommandResultFailure(s"Error: did not successfully translate sort expression: ${reason}")
           }
         case List(Leaf(ParseValue.PTerm("define-var-z3")), Leaf(ParseValue.PTerm(varName)), sortExpr, varExpr) =>
-          (VMTParser.translateSort(pts.getTypeEnv)(sortExpr), VMTParser.translateFormula(pts.getTypeEnv, pts.getInterpEnv)(varExpr)).tupled match {
+          (SmtlibParser.parseSort(pts.getTypeEnv)(sortExpr), SmtlibParser.parseFormula(pts.getTypeEnv, pts.getInterpEnv)(varExpr)).tupled match {
             case Right(sort, rhs) =>
               rhs.unify(sort) match {
                 case Some(unifiedRhs) =>
                   pts.getInterpEnv.add(varName, rhs)
-                  solver.defineVar(varName, sort, unifiedRhs) 
+                  solver.defineVar(varName, sort, unifiedRhs)
                   TempuCommandResultSuccess(s"Successfully defined ${varName} = ${unifiedRhs}")
                 case None =>
                   TempuCommandResultFailure(s"Error: define-var: cannot unify ${rhs.toString} with ${sort.toString}")

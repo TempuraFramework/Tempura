@@ -1,0 +1,146 @@
+(declare-sort time)
+
+(vmtlib (declare-fun |0:index| () index))
+(vmtlib (declare-fun _X () time))
+(vmtlib (declare-fun time.succ (time time) Bool))
+(vmtlib (declare-fun index.succ (index index) Bool))
+(vmtlib (declare-fun |<:time:time| (time time) Bool))
+(vmtlib (declare-fun |<:index:index| (index index) Bool))
+(vmtlib (declare-fun |0:time| () time))
+(vmtlib (declare-fun _idle () Bool))
+(vmtlib (declare-fun q1.recv () Bool))
+(vmtlib (declare-fun q1.send () Bool))
+
+(state-var q1.trying.now Bool :next new_q1.trying.now)
+(state-var |__ts0__new_fml:val| time :next new___ts0__new_fmlval)
+(state-var |__loc:y| time :next new___locy)
+(state-var q1.pending (Array time Bool) :next new_q1.pending)
+(state-var |__fml:x| time :next new___fmlx)
+(state-var .r Bool :next new_.r)
+(state-var __m_.r_a Bool :next new___m_.r_a)
+(state-var __ts0_b Bool :next new___ts0_b)
+(state-var q1.sending.now Bool :next new_q1.sending.now)
+(state-var __ts0__m_q1.receiving.now Bool :next new___ts0__m_q1.receiving.now)
+(state-var q1.test_fun (Array time (Array time Bool)) :next new_q1.test_fun)
+(state-var __ts0_a Bool :next new___ts0_a)
+(state-var __m_q1.trying.now Bool :next new___m_q1.trying.now)
+(state-var __m_q1.sending.now Bool :next new___m_q1.sending.now)
+(state-var q1.sending.value time :next new_q1.sending.value)
+(state-var __m_.r Bool :next new___m_.r)
+(state-var q1.receiving.now Bool :next new_q1.receiving.now)
+(state-var |__new_fml:val| time :next new___new_fmlval)
+(state-var q1.receiving.value time :next new_q1.receiving.value)
+
+(init
+  (and (not .r)
+       (= q1.pending ((as const (Array time Bool)) false))
+       (= q1.test_fun
+          ((as const (Array time (Array time Bool)))
+           ((as const (Array time Bool)) false)))
+       (not q1.sending.now)
+       (not q1.trying.now)
+       (not q1.receiving.now)))
+
+(transition
+  (and
+    (=> _idle
+        (and (not new_.r)
+             (= q1.trying.now new_q1.trying.now)
+             (= q1.pending new_q1.pending)
+             (= q1.receiving.value new_q1.receiving.value)
+             (= q1.receiving.now new_q1.receiving.now)
+             (= q1.test_fun new_q1.test_fun)
+             (= q1.sending.value new_q1.sending.value)
+             (= q1.sending.now new_q1.sending.now)))
+    (=> q1.recv
+        (let ((a!1 (forall ((|V0:time| time))
+                     (or (not __ts0_b)
+                         (not (select q1.pending |V0:time|))))))
+          (and (not __m_.r_a)
+               __m_q1.trying.now
+               (= __m_.r (or __m_.r_a __m_q1.trying.now))
+               (not new_q1.trying.now)
+               (= new_.r (or __m_.r new_q1.trying.now))
+               (= new_q1.pending
+                  (ite __ts0_b q1.pending
+                       (store q1.pending |__loc:y| false)))
+               (= |__ts0__new_fml:val| |__loc:y|)
+               (= new_q1.receiving.value
+                  (ite __ts0_b q1.receiving.value
+                       |__ts0__new_fml:val|))
+               __ts0__m_q1.receiving.now
+               (= new_q1.receiving.now (and __ts0_b q1.receiving.now))
+               (= q1.test_fun new_q1.test_fun)
+               (= q1.sending.value new_q1.sending.value)
+               (= q1.sending.now new_q1.sending.now)
+               (or __ts0_a __ts0_b)
+               (or (not __ts0_a) (select q1.pending |__loc:y|))
+               (forall ((|V0:time| time))
+                 (let ((a!1 (not (and (select q1.pending |V0:time|)
+                                      (or (= |V0:time| |__loc:y|)
+                                          (|<:time:time| |V0:time| |__loc:y|))
+                                      (not (= |V0:time| |__loc:y|))))))
+                   (or (not __ts0_a) a!1)))
+               a!1)))
+    (=> q1.send
+        (let ((a!1 (forall ((|T:time| time))
+                     (or (not (select q1.pending |T:time|))
+                         (|<:time:time| |T:time| |__fml:x|)))))
+          (and (not new_.r)
+               (= new_q1.pending (store q1.pending |__fml:x| true))
+               (= new_q1.test_fun
+                  (store q1.test_fun |__fml:x|
+                         ((as const (Array time Bool)) true)))
+               (= |__new_fml:val| |__fml:x|)
+               (= new_q1.sending.value |__new_fml:val|)
+               __m_q1.sending.now
+               (not new_q1.sending.now)
+               (= q1.trying.now new_q1.trying.now)
+               (= q1.receiving.value new_q1.receiving.value)
+               (= q1.receiving.now new_q1.receiving.now)
+               a!1)))
+    (or _idle q1.recv q1.send)
+    (or (not _idle) (not q1.recv))
+    (or (not _idle) (not q1.send))
+    (or (not q1.recv) (not q1.send))))
+
+(theory-axiom
+  (forall ((|X:time| time) (|Y:time| time) (|Z:time| time))
+    (let ((a!1 (and (|<:time:time| |X:time| |Z:time|)
+                    (not (and (|<:time:time| |X:time| |Y:time|)
+                              (|<:time:time| |Y:time| |Z:time|))))))
+      (or (not (time.succ |X:time| |Z:time|)) a!1))))
+
+(theory-axiom
+  (forall ((|T:time| time) (|U:time| time) (|V:time| time))
+    (or (not (and (|<:time:time| |T:time| |U:time|)
+                  (|<:time:time| |U:time| |V:time|)))
+        (|<:time:time| |T:time| |V:time|))))
+
+(theory-axiom
+  (forall ((|T:time| time) (|U:time| time))
+    (not (and (|<:time:time| |T:time| |U:time|)
+              (|<:time:time| |U:time| |T:time|)))))
+
+(theory-axiom
+  (forall ((|T:time| time) (|U:time| time))
+    (or (|<:time:time| |T:time| |U:time|)
+        (= |T:time| |U:time|)
+        (|<:time:time| |U:time| |T:time|))))
+
+(theory-axiom
+  (forall ((|X:time| time))
+    (or (= |0:time| |X:time|)
+        (|<:time:time| |0:time| |X:time|))))
+
+(live-property
+  (and q1.receiving.now
+       (= q1.receiving.value _X))
+  :name q)
+
+(live-assumption
+ (and q1.sending.now (= q1.sending.value _X)) :name p)
+
+(fair-assumption
+  q1.trying.now
+  :name r)
