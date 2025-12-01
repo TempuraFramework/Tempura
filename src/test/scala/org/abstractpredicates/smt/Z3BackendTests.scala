@@ -307,6 +307,9 @@ class Z3BackendTests extends AnyFunSuite {
   test("parsing back Z3 expressions") {
     val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
     val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    
+    println(s"z3 solver version: ${solver.getVersion}")
+    
     val ctx = solver.getContext
 
     val tt = ctx.mkTrue()
@@ -722,6 +725,22 @@ class Z3BackendTests extends AnyFunSuite {
     val liftedRecognizer = solver.liftTerm(recognizer.apply(pointValue).asInstanceOf[solver.LoweredTerm])
     val expectedRecognizer = Core.mkDatatypeRecognizer(pointSort, "Point", expectedPoint)
     assert(liftedRecognizer == expectedRecognizer)
+  }
+
+  test("parsing of finite sort elements") {
+    val (typeEnv, interpEnv) = (Core.emptyTypeEnv, Core.emptyInterpEnv)
+    val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
+    val ctx = solver.getContext
+
+    val fSort = typeEnv |- Core.finiteSort("U", 3)
+    val fVar1 = interpEnv |- ("var1", fSort)
+    val fVar2 = interpEnv |- ("var2", fSort)
+
+    solver.add(List(Core.mkNot(Core.mkEq(fVar1, fVar2))))
+    assert(solver.checkSat() == Result.SAT)
+    val model = solver.getModel.get
+    val formula = model.formula()
+    println(s"formula: ${formula}")
   }
 
   test("model blocking with asTerm and asNegatedTerm") {

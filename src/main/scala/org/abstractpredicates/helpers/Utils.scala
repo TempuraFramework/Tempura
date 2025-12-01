@@ -7,6 +7,7 @@ import shapeless3.typeable.Typeable
 import scala.reflect.TypeTest
 import shapeless3.typeable.syntax.typeable.cast
 
+import scala.collection.mutable.ListBuffer
 import scala.reflect.*
 import scala.quoted.Type
 
@@ -147,32 +148,202 @@ object Utils {
     def mapi[B](f: (Int, A) => B): List[B] =
       lst.zipWithIndex.map { case (x, i) => f(i, x) }
 
-  
+
   /** OS-specific helpers */
   enum OS {
     case Mac, Linux
     case Unknown(osString: String)
   }
-  
-  def getOS: OS = { 
+
+  def getOS: OS = {
     val osString = System.getProperty("os.name").toLowerCase
     if (osString.contains("mac") || osString.contains("darwin")) OS.Mac
     else if (osString.contains("linux")) OS.Linux
     else OS.Unknown(osString)
   }
 
-  def getLinuxDesktop: Option[String] =
+  // Cached desktop environment detection result
+  private var cachedDesktop: Option[Option[String]] = None
+
+  /**
+   * Detect Linux desktop environment using multiple strategies:
+   * 1. Environment variables (fastest, most reliable when present)
+   * 2. PDF mime handler (direct signal for PDF viewer preference)
+   * 3. Running processes (slowest, least reliable, last resort)
+   *
+   * Returns normalized DE name: "kde", "gnome", "xfce", etc.
+   * Returns None if detection fails or not on Linux.
+   */
+  def getLinuxDesktop: Option[String] = {
     if getOS != OS.Linux then None
     else {
-      val env = System.getenv()
-      val desktop = Option(env.get("XDG_CURRENT_DESKTOP"))
-        .orElse(Option(env.get("DESKTOP_SESSION")))
-        .map(_.toLowerCase)
-
-      desktop.collect {
-        case d if d.contains("kde") => "kde"
-        case d if d.contains("gnome") => "gnome"
+      cachedDesktop match {
+        case Some(result) => result
+        case None =>
+          val result = detectDesktopEnvVars()
+            .orElse {
+              println("trying strategy 2")
+              detectDesktopFromPdfMime()
+            }.orElse {
+              println("trying strategy 3")
+              detectDesktopFromProcesses()
+            }
+          cachedDesktop = Some(result)
+          result
       }
     }
+  }
 
+  /** Strategy 1: Check standard desktop environment variables */
+  private def detectDesktopEnvVars(): Option[String] = {
+    try {
+      val env = System.getenv()
+
+      // Try multiple env vars in order of reliability
+      Option(env.get("XDG_CURRENT_DESKTOP"))
+        .orElse(Option(env.get("XDG_SESSION_DESKTOP")))
+        .orElse(Option(env.get("DESKTOP_SESSION")))
+        .orElse(Option(env.get("GDMSESSION")))
+        .orElse(Option(env.get("KDE_FULL_SESSION")).filter(_ == "true").map(_ => "KDE"))
+        .orElse(Option(env.get("GNOME_DESKTOP_SESSION_ID")).map(_ => "GNOME"))
+        .map(_.toLowerCase)
+        .flatMap(normalizeDesktopName)
+    } catch {
+      case _: Exception => None
+    }
+  }
+
+  /** Strategy 2: Infer desktop from configured PDF viewer (task-specific heuristic) */
+  private def detectDesktopFromPdfMime(): Option[String] = {
+    import scala.sys.process._
+    try {
+      // Query default PDF handler via xdg-mime or gio
+      val pdfHandler =
+        scala.util.Try(Seq("xdg-mime", "query", "default", "application/pdf").!!.trim.toLowerCase)
+          .orElse(scala.util.Try(Seq("gio", "mime", "application/pdf").!!.trim.toLowerCase))
+          .toOption
+      println(s"pdfHandler: ${pdfHandler}")
+      pdfHandler.flatMap {
+        case h if h.contains("okular") => Some("kde")
+        case h if h.contains("evince") || h.contains("eog") => Some("gnome")
+        case h if h.contains("atril") => Some("mate")
+        case h if h.contains("qpdfview") => Some("kde")
+        case h if h.contains("libreoffice") => Some("kde")
+        case _ => None
+      }
+    } catch {
+      case _: Exception => None
+    }
+  }
+
+  /** Strategy 3: Check for desktop-specific running processes (last resort) */
+  private def detectDesktopFromProcesses(): Option[String] = {
+    import scala.sys.process._
+    try {
+      val processes = Seq("ps", "-eo", "comm").!!.toLowerCase
+
+      // Check for specific desktop process signatures
+      if processes.contains("plasmashell") ||
+        processes.contains("kwin_x11") ||
+        processes.contains("kwin_wayland") then Some("kde")
+      else if processes.contains("gnome-shell") then Some("gnome")
+      else if processes.contains("xfce4-session") then Some("xfce")
+      else if processes.contains("mate-session") then Some("mate")
+      else None
+    } catch {
+      case _: Exception => None
+    }
+  }
+
+  /** Normalize desktop name to canonical form */
+  private def normalizeDesktopName(name: String): Option[String] = {
+    name.toLowerCase match {
+      case d if d.contains("kde") || d.contains("plasma") => Some("kde")
+      case d if d.contains("gnome") => Some("gnome")
+      case d if d.contains("xfce") => Some("xfce")
+      case d if d.contains("mate") => Some("mate")
+      case d if d.contains("lxde") => Some("lxde")
+      case d if d.contains("lxqt") => Some("lxqt")
+      case d if d.contains("cinnamon") => Some("cinnamon")
+      case d if d.nonEmpty => Some(d)
+      case _ => None
+    }
+  }
+
+  trait AccumulatingEntry[T] {
+    def add(t: T*): Unit
+
+    def addNamed(ts: (T, String)*): Unit
+
+    def get: List[(String, T)]
+
+    def getContent: List[T]
+
+    def reset(): Unit
+
+    def length: Int
+
+    def isEmpty: Boolean
+
+    def getName: String
+  }
+
+  object AccumulatingEntry {
+    def apply[T](name: String): AccumulatingEntry[T] =
+      new AccumulatingEntry[T] {
+        private var cnt = 0
+        private var buffer: scala.collection.mutable.Map[String, T] = scala.collection.mutable.Map[String, T]()
+
+        override def add(t: T*): Unit =
+          t foreach { x =>
+            buffer.update(getName + "_" + cnt.toString, x)
+            cnt += 1
+          }
+
+        override def addNamed(ts: (T, String)*): Unit =
+          ts foreach { x =>
+            buffer.update(x._2, x._1)
+          }
+
+        override def get: List[(String, T)] = this.buffer.toList
+
+        override def getContent: List[T] = this.buffer.values.toList
+
+        override def reset(): Unit = {
+          this.buffer = scala.collection.mutable.Map()
+        }
+
+        override def length: Int = this.buffer.size
+
+        override def isEmpty: Boolean = this.buffer.isEmpty
+
+        override def toString: String = getName + " {" + buffer.toString + "}"
+
+        override def getName: String = name
+      }
+  }
+
+  def cartesianProduct[A](domains: List[List[A]]): List[List[A]] =
+    domains match
+      case Nil => List(List.empty[A])
+      case head :: tail =>
+        for
+          element <- head
+          combination <- cartesianProduct(tail)
+        yield element :: combination
+
+  // Exact runtime casting
+  def exactCast[T](x: Any)(using ct: ClassTag[T]): Option[T] =
+    if x != null && x.getClass == ct.runtimeClass then
+      Some(x.asInstanceOf[T])
+    else
+      None
+
+  // Exact casting of ClassTags
+  def exactTagCast[X, T](ct: ClassTag[X])(using ctY: ClassTag[T]): Option[ClassTag[T]] =
+    if ct.runtimeClass == ctY.runtimeClass then
+      // the asInstanceOf is “morally safe” because of the runtime check
+      Some(ct.asInstanceOf[ClassTag[T]])
+    else
+      None
 }

@@ -18,7 +18,6 @@ class AllSatLinearOrderSuite extends AnyFunSuite {
 
   private def timeLinearOrderAxioms(timeSort: Core.FiniteUniverseSort,
                                     ltFun: Core.Expr[Core.FunSort[Core.BoolSort]],
-                                    succFun: Core.Expr[Core.FunSort[Core.BoolSort]],
                                     zero: Core.Expr[Core.FiniteUniverseSort]): List[Core.Expr[Core.BoolSort]] = {
 
     def vars(names: String*): List[(String, Core.BoxedSort)] =
@@ -35,21 +34,6 @@ class AllSatLinearOrderSuite extends AnyFunSuite {
     def lt(lhs: Core.Expr[Core.FiniteUniverseSort], rhs: Core.Expr[Core.FiniteUniverseSort]): Core.Expr[Core.BoolSort] =
       app(ltFun, lhs, rhs)
 
-    def succ(lhs: Core.Expr[Core.FiniteUniverseSort], rhs: Core.Expr[Core.FiniteUniverseSort]): Core.Expr[Core.BoolSort] =
-      app(succFun, lhs, rhs)
-
-    // forall X, Y, Z.
-    // not(successor(X, Z))
-    //  or
-    // (X < Z) & not(X < Y /\ Y < Z)
-    // Either Z is successor of X, or Z is successor of X and is characterized by
-    //   the fact that there is no Y such that X < Y and Y < Z (that is, Y in middle of (X, Z)).
-    val immediateSuccessor =
-      Core.mkForall(
-        vars("X", "Y", "Z"),
-        Core.mkNot(succ(v("X"), v("Z"))) \/
-          (lt(v("X"), v("Z")) /\ Core.mkNot(lt(v("X"), v("Y")) /\ lt(v("Y"), v("Z"))))
-      )
 
     // forall T, U, V.
     //  either not(T < U /\ U < V) or T < V
@@ -79,7 +63,7 @@ class AllSatLinearOrderSuite extends AnyFunSuite {
         Core.mkEq(zero, v("X0")) \/ lt(zero, v("X0"))
       )
 
-    List(immediateSuccessor, transitiveOrder, antisymmetric, totalOrder, zeroLeast)
+    List(transitiveOrder, antisymmetric, totalOrder, zeroLeast)
   }
 
   private case class AllSatFixture(cardinality: Int,
@@ -96,19 +80,16 @@ class AllSatLinearOrderSuite extends AnyFunSuite {
     val timeSort = typeEnv |- FiniteUniverseSort("time", cardinality)
 
     val ltTimeSort = Core.FunSort(List(timeSort.box, timeSort.box), Core.BoolSort())
-    val succTimeSort = Core.FunSort(List(timeSort.box, timeSort.box), Core.BoolSort())
     val ltTimeFun = interpEnv |- ("<:time:time", ltTimeSort)
-    val timeSuccFun = interpEnv |- ("time.succ", succTimeSort)
     val zeroTime = interpEnv |- ("0:time", timeSort)
 
     val solver = Z3Solver.Z3Solver(typeEnv, interpEnv)
     solver.initialize(SmtSolver.allLia)
 
-    val assertions = timeLinearOrderAxioms(timeSort, ltTimeFun, timeSuccFun, zeroTime)
+    val assertions = timeLinearOrderAxioms(timeSort, ltTimeFun, zeroTime)
 
     val vocab: Set[(String, Core.BoxedSort)] = Set(
       ("<:time:time", ltTimeSort.box),
-      ("time.succ", succTimeSort.box),
       ("0:time", timeSort.box)
     )
 

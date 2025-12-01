@@ -18,11 +18,11 @@ libraryDependencies ++= Seq(
   "com.lihaoyi" % "ammonite_3.6.3" % "3.0.2", //% "test" cross CrossVersion.full,
   "de.uni-freiburg.informatik.ultimate" % "smtinterpol" % "2.5-1388-ga5a4ab0c", // SMTInterpol
   //"tools.aqua" % "z3-turnkey" % "4.14.1" ,// Z3-Turnkey: https://github.com/tudo-aqua/z3-turnkey
-  "tools.aqua" % "cvc5-turnkey" % "1.2.0" // CVC5-Turnkey: https://github.com/tudo-aqua/cvc5-turnkey
+  "tools.aqua" % "cvc5-turnkey" % "1.2.0", // CVC5-Turnkey: https://github.com/tudo-aqua/cvc5-turnkey
+  "org.scala-lang" %% "scala3-staging" % scalaVersion.value // for staged evaluation support
 )
 
-// TODO: Ammonite cannot accept stdin if we set run / fork := true.
-// TODO we might try `ThisBuild / run / connectInput := true` next.
+// XXX: Ammonite cannot accept stdin if we set run / fork := true.
 
 ////////////////
 
@@ -51,17 +51,18 @@ pPrint := {
 // CAUTION: To override java.library.path we need to run in fork := true mode.
 // But by default in this mode Ammonite console will break, so we also need
 // to pipe in stdin via setting connectInput := true.
-ThisBuild / run / connectInput := true
-ThisBuild / run / fork := true
+ThisBuild / fork := true
+ThisBuild / connectInput := true
+//Compile / run / connectInput := true
+//Compile / run / fork := true
+//Compile / console / fork := true
 
-Compile / run / connectInput := true
-Compile / run / fork := true
+//Test / run / connectInput := true
+//Test / run / fork := true
+//Test / console / fork := true
 
-Test / run / connectInput := true
-Test / run / fork := true
-
-Compile / console / fork := true
-Compile / run / envVars ++= Map(
+//Compile / run
+ThisBuild / envVars ++= Map(
   // adjust path to wherever you put the two native libs
   "LD_LIBRARY_PATH" -> (baseDirectory.value / "lib" / platform).getAbsolutePath,
   "DYLD_LIBRARY_PATH" -> (baseDirectory.value / "lib" /  platform).getAbsolutePath,
@@ -70,22 +71,10 @@ Compile / run / envVars ++= Map(
     sys.env.get("PATH").fold(p)(old => s"$p${java.io.File.pathSeparator}$old")
   }
 )
-Compile / run / javaOptions ++= Seq(
+//Compile / run / 
+ThisBuild / javaOptions ++= Seq(
   s"-Djava.library.path=${(baseDirectory.value / "lib" / platform).getAbsolutePath}"
 )
-
-run / envVars ++= Map(
-  "LD_LIBRARY_PATH" -> (baseDirectory.value / "lib" / platform).getAbsolutePath,
-  "DYLD_LIBRARY_PATH" -> (baseDirectory.value / "lib" /  platform).getAbsolutePath,
-  "PATH" -> {
-    val p = (baseDirectory.value / "lib").getAbsolutePath
-    sys.env.get("PATH").fold(p)(old => s"$p${java.io.File.pathSeparator}$old")
-  }
-)
-run / javaOptions ++= Seq(
-  s"-Djava.library.path=${(baseDirectory.value / "lib" / platform).getAbsolutePath}"
-)
-
 
 sourceGenerators in Test += Def.task {
   val file = (sourceManaged in Test).value / "amm.scala"

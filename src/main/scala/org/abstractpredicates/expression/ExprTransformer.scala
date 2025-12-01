@@ -4,6 +4,7 @@ import org.abstractpredicates.helpers.Utils.failwith
 import org.abstractpredicates.expression.Core.*
 import org.abstractpredicates.expression.Core.BoxedExpr
 import org.abstractpredicates.expression.Core.SortValue
+import org.abstractpredicates.expression.Syntax.*
 
 import cats.syntax.all.*
 
@@ -11,8 +12,11 @@ class ExprTransformer {
 
   def varTransformer[A <: Sort[A]](env: InterpEnv)(v: Var[A]): BoxedExpr = {
     env(v.name) match {
-      case Some(t: Expr[A]) =>
-        t
+      case Some(e) =>
+        e.unify(v.sort) match {
+          case Some(t) => t
+          case None => v
+        }
       case _ => v
     }
   }
@@ -24,7 +28,7 @@ class ExprTransformer {
     val visitedIdx = transform(env)(a.index)
     visitedArr.unbox match {
       case Const(SortValue.ArrayValue(default, _)) =>
-        default.box()
+        default.box() // the type of an array-select is the range of the array
       case _ =>
         visitedArr.sort match {
           case t@Core.ArraySort(_, _) if t.domainSort == visitedIdx.sort =>
@@ -86,24 +90,33 @@ class ExprTransformer {
   // Note that in general, the order of parameters in a function signature doesn't matter;
   // Hence, we convert a varBinding to an environment (order-less) when performing substitution.
   def substituteTransformer[X <: Sort[X]](env: InterpEnv)(expr: Substitute[X]): BoxedExpr = {
-    val newEnv = env ++@ expr.varBindings.toEnv
-    val body = transform(newEnv)(expr.expr)
+    val transformedArgs =
+      expr.varBindings.map(x =>
+        (x._1, transform(env)(x._2))
+      )
+    // XXX: probably shouldn't beta-reduce here  
+    // val newEnv = env ++@ transformedArgs.toEnv
+    val body = transform(env)(expr.expr)
     body.unbox match {
-      case Macro(_, _, newBody) => newBody
-      case _ => expr
+      case m @ Macro(newName, newArgs, newBody) => 
+        Substitute(expr.attribute, transformedArgs, m)(using m.sort)
+      case v @ Var(name, f @ Core.FunSort(dom, range)) =>
+        Substitute(expr.attribute, transformedArgs, Var(name, f))(using f)
+      case _ => 
+        body
     }
   }
-
+  
   def forallTransformer(env: Core.InterpEnv)(expr: Forall): BoxedExpr = {
     val body = transform(env)(expr.body)
-
+    
     body.unify(Core.BoolSort()) match {
       case Some(bExpr) => Forall(expr.vars, bExpr)
       case None => failwith(s"forallTransformer: forall body transformed into a non-boolean expression: ${body}")
     }
   }
 
-  def existsVisitor(env: Core.InterpEnv)(expr: Exists): BoxedExpr = {
+  def existsTransformer(env: Core.InterpEnv)(expr: Exists): BoxedExpr = {
     val body = transform(env)(expr.body)
 
     body.unify(Core.BoolSort()) match {
@@ -112,7 +125,7 @@ class ExprTransformer {
     }
   }
 
-  def datatypeConstructorRecognizerVisitor(env: Core.InterpEnv)(expr: DatatypeConstructorRecognizer): BoxedExpr = {
+  def datatypeConstructorRecognizerTransformer(env: Core.InterpEnv)(expr: DatatypeConstructorRecognizer): BoxedExpr = {
     val visited = expr.subExpr
     DatatypeConstructorRecognizer(expr.dt, expr.constructorName, visited)
   }
@@ -131,8 +144,8 @@ class ExprTransformer {
       case mac@Macro(_, _, _) => macroTransformer(env)(mac)
       case sub@Substitute(_, _, _) => substituteTransformer(env)(sub)
       case forall@Forall(_, _) => forallTransformer(env)(forall)
-      case exists@Exists(_, _) => existsVisitor(env)(exists)
-      case datatypeConstructorRecognizer: DatatypeConstructorRecognizer => datatypeConstructorRecognizerVisitor(env)(datatypeConstructorRecognizer)
+      case exists@Exists(_, _) => existsTransformer(env)(exists)
+      case datatypeConstructorRecognizer: DatatypeConstructorRecognizer => datatypeConstructorRecognizerTransformer(env)(datatypeConstructorRecognizer)
     }
   }
 

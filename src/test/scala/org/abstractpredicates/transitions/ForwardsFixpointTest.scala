@@ -4,7 +4,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.helpers.Utils.*
 import org.abstractpredicates.expression.Syntax.*
-import org.abstractpredicates.helpers.{DotPrinter, FormulaPrinter}
+import org.abstractpredicates.parsing.printers.{DotPrinter, FormulaPrinter}
 import org.abstractpredicates.smt.SmtSolver.*
 import org.abstractpredicates.smt.{SmtSolver, Z3Solver}
 
@@ -44,12 +44,13 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0",trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(),
+      liveProperties = List(),
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )
@@ -100,12 +101,13 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar0, timedVar1),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0",trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(),
+      liveProperties = List(),
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )
@@ -155,12 +157,13 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar0, timedVar1),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0",trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(),
+      liveProperties = List(),
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )
@@ -198,7 +201,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
           s"${x}: ${graph.labelOf(x).toString}"
         ),
         Some(e =>
-          s"${FormulaPrinter.ExprPrinter(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))()}"
+          s"${FormulaPrinter(trs.typeEnv, trs.interpEnv)(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))}"
         ))
 
     graphPrinter.visualizeDOT(None, true)
@@ -230,7 +233,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
           s"${x}: ${graph.labelOf(x).toString}"
         ),
         Some(e =>
-          s"${FormulaPrinter.ExprPrinter(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))()}"
+          s"${FormulaPrinter(trs.typeEnv, trs.interpEnv)(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))}"
         ))
 
     graphPrinter.visualizeDOT(None, true)
@@ -259,7 +262,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
           s"${x}: ${graph.labelOf(x).toString}"
         ),
         Some(e =>
-          s"${FormulaPrinter.ExprPrinter(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))()}"
+          s"${FormulaPrinter(trs.typeEnv, trs.interpEnv)(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))}"
         ))
 
     graphPrinter.visualizeDOT(None, true)
@@ -288,7 +291,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val fixpoint = ForwardsFixpoint(trs, solver, List())
 
     fixpoint.initialize()
-    val initStates = fixpoint.computeInitialStates()
+    val initStates = fixpoint.initialStates()
 
     // Should have exactly 1 initial state
     assert(initStates.size == 1, s"Expected 1 initial state, got ${initStates.size}")
@@ -299,7 +302,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val fixpoint = ForwardsFixpoint(trs, solver, List())
 
     fixpoint.initialize()
-    val initStates = fixpoint.computeInitialStates()
+    val initStates = fixpoint.initialStates()
 
     // Should have exactly 1 initial state (00)
     assert(initStates.size == 1, s"Expected 1 initial state, got ${initStates.size}")
@@ -310,7 +313,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val fixpoint = ForwardsFixpoint(trs, solver, List())
 
     fixpoint.initialize()
-    val initStates = fixpoint.computeInitialStates()
+    val initStates = fixpoint.initialStates()
 
     assert(initStates.size == 1, "Should have 1 initial state")
 
@@ -350,12 +353,13 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0",trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(),
+      liveProperties = List(),
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )
@@ -387,12 +391,13 @@ class ForwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0", trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(),
+      liveProperties = List(),
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )

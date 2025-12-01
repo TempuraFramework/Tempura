@@ -1,4 +1,5 @@
-package org.abstractpredicates.parsing.ast
+package org.abstractpredicates.parsing.sexpr
+
 
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.expression.Core.*
@@ -11,28 +12,25 @@ import scala.annotation.tailrec
 import scala.language.postfixOps
 import scala.reflect.ClassTag
 import cats.implicits.*
+import org.abstractpredicates.helpers.Transforms.EnvTransform
 import org.abstractpredicates.transitions.*
 
-trait VMTParser {
-  def translateSort(typeEnv: Core.TypeEnv)(t: ParseTree): Either[(String, ParseTree), Core.BoxedSort]
+object SmtlibParser extends EnvTransform[ParseTree, Core.BoxedExpr](using summon[ClassTag[ParseTree]], summon[ClassTag[Core.BoxedExpr]]) {
 
-  def translateFormula(typeEnv: TypeEnv, interpEnv: InterpEnv)(tree: ParseTree): Either[(String, ParseTree), BoxedExpr]
-
-  def parse(pts: PreTransitionSystem)(t: ParseTree): Either[(String, ParseTree), PreTransitionSystem]
-}
-
-object VMTParser {
+  private def placeholderArgNames(arity: Int) = {
+    (0 until arity).map(i => s"arg_$i").toList
+  }
 
   // Translate a single sort.
   // For the leaf-level translation, we lookup a sort of name "T" in typeEnv. If T is not present
   // then returns an error. This assumes that all sort declarations have been processed and added to typeEnv.
-  def translateSort(typeEnv: Core.TypeEnv)(t: ParseTree): Either[(String, ParseTree), Core.BoxedSort] = {
+  def parseSort(typeEnv: Core.TypeEnv)(t: ParseTree): Either[(String, ParseTree), Core.BoxedSort] = {
     t match {
       case INode(Leaf(ParseValue.PTerm("Array")) :: tail) =>
         if tail.length != 2 then
           Left("translateSort: Array length not equals 2", t)
         else
-          (translateSort(typeEnv)(tail.head), translateSort(typeEnv)(tail(1))).tupled match {
+          (parseSort(typeEnv)(tail.head), parseSort(typeEnv)(tail(1))).tupled match {
             case Right(dom, range) =>
               Right(arraySort(dom.sort, range.sort))
             case _ =>
@@ -42,7 +40,7 @@ object VMTParser {
       case INode(Leaf(ParseValue.PTerm("->")) :: tail) =>
         // XXX: we need an explicit cast here, otherwise scala compiler
         // infers tail as having a List[Any] type.
-        tail.traverse(translateSort(typeEnv)) match {
+        tail.traverse(parseSort(typeEnv)) match {
           case Right(dom :+ range) =>
             Right(Core.funSort(dom, range.sort))
           case _ =>
@@ -59,7 +57,7 @@ object VMTParser {
           case None => Left(s"sort not found: $custom", t)
         }
       case INode(Leaf(ParseValue.PTerm(custom)) :: args) => // wrap every parametric sort instantiation with an AliasSort
-        args.traverse(translateSort(typeEnv)) match {
+        args.traverse(parseSort(typeEnv)) match {
           case Right(argsT) =>
             typeEnv(custom) match {
               case Some(cSort: Core.UnInterpretedSort) =>
@@ -72,7 +70,7 @@ object VMTParser {
           case _ =>
             Left("translateSort: parametric sort malformed", t)
         }
-      case INode(List(INode(t))) => translateSort(typeEnv)(INode(t))
+      case INode(List(INode(t))) => parseSort(typeEnv)(INode(t))
       case _ =>
         throw new Exception("ERROR: unhandled case: " + t.toString)
 
@@ -85,7 +83,7 @@ object VMTParser {
   def parseOpArgs[X <: Sort[X]](typeEnv: TypeEnv, interpEnv: InterpEnv)(subExprs: List[ParseTree], x: X): Either[(String, ParseTree), List[Expr[X]]] = {
     subExprs.traverse(
       currExpr =>
-        translateFormula(typeEnv, interpEnv)(currExpr) match {
+        parseFormula(typeEnv, interpEnv)(currExpr) match {
           case Right(b) =>
             b.unify(x) match {
               case Some(e) => Right(e)
@@ -100,7 +98,7 @@ object VMTParser {
   def parseSortedArgs(typeEnv: TypeEnv, interpEnv: InterpEnv)(subExprs: List[ParseTree]): Either[(String, ParseTree), List[(String, BoxedSort)]] = {
     subExprs.traverse(subExpr => subExpr match {
       case INode(List(Leaf(ParseValue.PTerm(arg)), sortExpr)) =>
-        translateSort(typeEnv)(sortExpr) match {
+        parseSort(typeEnv)(sortExpr) match {
           case Right(sort) =>
             Right(arg, sort)
           case Left(reason) =>
@@ -119,7 +117,7 @@ object VMTParser {
           case Right(iList) =>
             currExpr match {
               case INode(List(Leaf(ParseValue.PTerm(name)), defExpr)) =>
-                translateFormula(typeEnv, interpEnv)(defExpr) match {
+                parseFormula(typeEnv, interpEnv)(defExpr) match {
                   case Right(defExprT) =>
                     Right((name, defExprT) :: iList)
                   case Left(reason) => Left(reason)
@@ -140,7 +138,7 @@ object VMTParser {
     val zipped = argDecls.zip(subExprs)
     zipped.foldLeft[Either[(String, ParseTree), Core.InterpList]](Right(List()))(
       (acc, curr) =>
-        (acc, translateFormula(typeEnv, interpEnv)(curr._2)) match {
+        (acc, parseFormula(typeEnv, interpEnv)(curr._2)) match {
           case (Right(iList), Right(currExpr)) =>
             currExpr.unify[curr._1._2.S](curr._1._2.sort) match {
               case Some(_) =>
@@ -158,24 +156,25 @@ object VMTParser {
     }
   }
 
-  private def placeholderArgNames(arity: Int) = {
-    (0 until arity).map(i => s"arg_$i").toList
-  }
 
   // Translates an (as const ...) or (_ as (...) (...) expression
   // TODO: this is wrong
-  def translateAsExpr(typeEnv: TypeEnv, interpEnv: InterpEnv)(asType: ParseTree, asTypeExpr: ParseTree): Either[(String, ParseTree), BoxedExpr] = {
-    (translateFormula(typeEnv, interpEnv)(asTypeExpr), translateSort(typeEnv)(asType)) match {
+  def parseAsExpr(typeEnv: TypeEnv, interpEnv: InterpEnv)(asType: ParseTree, asTypeExpr: ParseTree): Either[(String, ParseTree), BoxedExpr] = {
+    (parseFormula(typeEnv, interpEnv)(asTypeExpr), parseSort(typeEnv)(asType)) match {
       case (Right(asTypeExprT), Right(asTypeT)) =>
         asTypeExprT match {
           // the following type-test is fine, because of the semantic check in the following if-statement
           // TODO correct this type-test
-          case f: FunSort[asTypeExprT.T] if f.rangeSort == asTypeExprT.sort => {
-            Right(BoxedExpr.make(
-              Core.funSort(f.domainSort, f.rangeSort),
-              mkMacro(getUniqueName("as-expr-macro"), List(), asTypeExprT.e))
-            )
-          }
+          case f@FunSort(domainSort, rangeSort) =>
+            asTypeExprT.unify(rangeSort) match {
+              case Some(unifiedExpr) =>
+                Right(BoxedExpr.make(
+                  Core.funSort(domainSort, rangeSort),
+                  mkMacro(getUniqueName("as-expr-macro"), List(), unifiedExpr))
+                )
+              case None =>
+                Left(s"parseAsExpr: failed to unify ${rangeSort} with ${asTypeExprT.sort}", asTypeExpr)
+            }
           case ArraySort(domSort, rangeSort) =>
 
             asTypeExprT.unify(rangeSort) match {
@@ -185,7 +184,6 @@ object VMTParser {
                 Left(s"translateAsExpr: cannot unify ${rangeSort} with ${asTypeExprT.sort}", asTypeExpr)
 
             }
-
           //  rangeSort match {
           //    case rs: asTypeExprT.T =>
           //      Right(Expr.Const(SortValue.ArrayValue(asTypeExprT.e, ArraySort(domSort, rs))))
@@ -201,8 +199,51 @@ object VMTParser {
     }
   }
 
+  def parseConstructor(typeEnv: TypeEnv)(t: ParseTree): Either[(String, ParseTree), Core.Constructor] = {
+    t match {
+      case Leaf(ParseValue.PTerm(enumConstructor)) =>
+        Right(Core.Constructor(enumConstructor, List()))
+      case INode(Leaf(ParseValue.PTerm(constructorName)) :: constructorArgs) =>
+        constructorArgs.traverse(parseSort(typeEnv)) match {
+          case Right(constructorSorts) =>
+            // Seems like the SMTLIB standard does not support named arguments to constructors
+            // but Z3 API does.
+            Right(Constructor(constructorName, constructorSorts.zipWithIndex.map(x => (s"c_${x._2}", x._1))))
+          case Left(reason) =>
+            Left(reason._1, t)
+        }
+      case _ =>
+        Left("invalid constructor declaration", t)
+    }
+  }
+
+  // TODO: handling of parametricity here is a bit buggy. Need to rethink.
+  @tailrec
+  def parseConstructors(typeEnv: TypeEnv)(ts: List[ParseTree]): Either[(String, List[ParseTree]), List[Core.Constructor]] = {
+    ts match {
+      case Leaf(ParseValue.PTerm("par")) :: INode(parametricTypes) :: rest => {
+        parametricTypes.traverse {
+          case Leaf(ParseValue.PTerm(param)) => Some(param)
+          case _ => None
+        } match {
+          case Some(params) =>
+            parseConstructors(typeEnv ++@ (params.map(x => (x, Core.UnInterpretedSort(x, 0).box)).toEnv))(rest)
+          case None =>
+            Left("parametric declare-datatype statement's parameters malformed", ts)
+        }
+      }
+      case List(Leaf(ParseValue.PTerm(constructorName))) =>
+        Right(List(Core.Constructor(constructorName, List())))
+      case constructorDecls =>
+        constructorDecls.traverse(parseConstructor(typeEnv)) match {
+          case Right(cons) => Right(cons)
+          case Left(reason) => Left(reason._1, ts)
+        }
+    }
+  }
+
   // translates a formula of type Expr[T], boxing the type T and the expression together in BoxedExpr.
-  def translateFormula(typeEnv: TypeEnv, interpEnv: InterpEnv)(tree: ParseTree): Either[(String, ParseTree), BoxedExpr] = {
+  def parseFormula(typeEnv: TypeEnv, interpEnv: InterpEnv)(tree: ParseTree): Either[(String, ParseTree), BoxedExpr] = {
     tree match {
       case Leaf(ParseValue.PTerm(varName)) =>
         interpEnv(varName) match {
@@ -229,7 +270,7 @@ object VMTParser {
           case Left(reason) => Left(reason)
         }
       case INode(List(Leaf(ParseValue.PTerm(notTerm)), subExpr)) =>
-        translateFormula(typeEnv, interpEnv)(subExpr) match {
+        parseFormula(typeEnv, interpEnv)(subExpr) match {
           case Right(b) =>
             b.unify(Core.BoolSort()) match {
               case Some(bs) =>
@@ -239,7 +280,7 @@ object VMTParser {
           case Left(reason) => Left(reason)
         }
       case INode(List(Leaf(ParseValue.PTerm("=")), lhs, rhs)) =>
-        (translateFormula(typeEnv, interpEnv)(lhs), translateFormula(typeEnv, interpEnv)(rhs)).tupled match {
+        (parseFormula(typeEnv, interpEnv)(lhs), parseFormula(typeEnv, interpEnv)(rhs)).tupled match {
           case Right(lhsT, rhsT) =>
             rhsT.unify(lhsT.sort) match {
               case Some(rhsTC) =>
@@ -250,7 +291,7 @@ object VMTParser {
           case Left(reason) => Left(s"translateFormula: malformed equality comparison: ${reason._1}", tree)
         }
       case INode(List(Leaf(ParseValue.PTerm("=>")), premise, conclusion)) => // if-then
-        (translateFormula(typeEnv, interpEnv)(premise), translateFormula(typeEnv, interpEnv)(conclusion)) match {
+        (parseFormula(typeEnv, interpEnv)(premise), parseFormula(typeEnv, interpEnv)(conclusion)) match {
           case (Right(premiseT), Right(conclusionT)) =>
             (premiseT.unify(BoolSort()), conclusionT.unify(BoolSort())).tupled match {
               case Some(premiseB, conclusionB) =>
@@ -263,7 +304,7 @@ object VMTParser {
           case _ => Left("translateFormula: malformed implication", tree)
         }
       case INode(List(Leaf(ParseValue.PTerm(p)), premise, thenBranch, elseBranch)) if (p == "=>" || p == "ite") => // if-then-else
-        (translateFormula(typeEnv, interpEnv)(premise), translateFormula(typeEnv, interpEnv)(thenBranch), translateFormula(typeEnv, interpEnv)(elseBranch)).tupled match {
+        (parseFormula(typeEnv, interpEnv)(premise), parseFormula(typeEnv, interpEnv)(thenBranch), parseFormula(typeEnv, interpEnv)(elseBranch)).tupled match {
           case Right(premiseT, thenBranchT, elseBranchT) =>
             (premiseT.unify[BoolSort](BoolSort()), thenBranchT.unify(elseBranchT.sort)).tupled match {
               case Some(premiseB, thenBranchUnified) =>
@@ -282,7 +323,7 @@ object VMTParser {
           case Right(sortedArgs) =>
             val params = sortedArgs.map(x => (x._1, BoxedExpr.make(x._2, Core.mkVar(x._1, x._2))))
             val newInterpEnv = Core.emptyInterpEnv.addFromList(params)
-            translateFormula(typeEnv, interpEnv ++@ newInterpEnv)(unparsedExpr) match {
+            parseFormula(typeEnv, interpEnv ++@ newInterpEnv)(unparsedExpr) match {
               case Right(f) =>
                 f.unify[BoolSort](BoolSort()) match {
                   case Some(g) =>
@@ -299,7 +340,7 @@ object VMTParser {
           case Right(sortedArgs) =>
             val params = sortedArgs.map(x => (x._1, BoxedExpr.make(x._2, Core.mkVar(x._1, x._2))))
             val newInterpEnv = Core.emptyInterpEnv.addFromList(params)
-            translateFormula(typeEnv, interpEnv ++@ newInterpEnv)(unparsedExpr) match {
+            parseFormula(typeEnv, interpEnv ++@ newInterpEnv)(unparsedExpr) match {
               case Right(f) =>
                 f.unify[BoolSort](BoolSort()) match {
                   case Some(g) =>
@@ -312,7 +353,7 @@ object VMTParser {
           case Left(reason) => Left(reason)
         }
       case INode(List(Leaf(ParseValue.PTerm("select")), arrExpr, indexExpr)) =>
-        (translateFormula(typeEnv, interpEnv)(arrExpr), translateFormula(typeEnv, interpEnv)(indexExpr)).tupled match {
+        (parseFormula(typeEnv, interpEnv)(arrExpr), parseFormula(typeEnv, interpEnv)(indexExpr)).tupled match {
           case Right(arrExprT, indexExprT) =>
             arrExprT.sort match {
               case Core.ArraySort(domSort, rangeSort) =>
@@ -329,11 +370,11 @@ object VMTParser {
           case Left(reason) => Left(s"translateFormula: malformed select statement, reason: ${reason}", tree)
         }
       case INode(List(Leaf(ParseValue.PTerm("store")), arrExpr, indexExpr, valueExpr)) =>
-        (translateFormula(typeEnv, interpEnv)(arrExpr),
-          translateFormula(typeEnv, interpEnv)(indexExpr),
-          translateFormula(typeEnv, interpEnv)(valueExpr)).tupled match {
+        (parseFormula(typeEnv, interpEnv)(arrExpr),
+          parseFormula(typeEnv, interpEnv)(indexExpr),
+          parseFormula(typeEnv, interpEnv)(valueExpr)).tupled match {
           case Right(arrExprT, indexExprT, valueExprT) => {
-            val sort = Core.ArraySort[indexExprT.T, valueExprT.T](indexExprT.sort, valueExprT.sort)
+            val sort = Core.ArraySort(indexExprT.sort, valueExprT.sort)
             arrExprT.unify(sort) match {
               case Some(arrExprC) =>
                 Right(BoxedExpr.make(sort,
@@ -350,7 +391,7 @@ object VMTParser {
       case INode(List(Leaf(ParseValue.PTerm("let")), INode(letAssignExpr), letBody)) =>
         parseLetAssignment(typeEnv, interpEnv)(letAssignExpr) match {
           case Right(interpList) =>
-            translateFormula(typeEnv, interpEnv ++@ interpList.toEnv)(letBody) match {
+            parseFormula(typeEnv, interpEnv ++@ interpList.toEnv)(letBody) match {
               case Right(letBodyT) =>
                 val sortedArgs = interpList.map(x => (x._1, x._2.sort.box))
                 Right(BoxedExpr.make(letBodyT.sort, //TODO: this is incorrect. Need to wrap this around with a Expr.Substitute expression.
@@ -365,7 +406,7 @@ object VMTParser {
         }
       case INode(List(INode(List(Leaf(ParseValue.PTerm("as")), Leaf(ParseValue.PTerm("const")), asConstType)), asConstExpr)) =>
         /* ((as const (Array time Bool)) true) */
-        (translateFormula(typeEnv, interpEnv)(asConstExpr), translateSort(typeEnv)(asConstType)) match {
+        (parseFormula(typeEnv, interpEnv)(asConstExpr), parseSort(typeEnv)(asConstType)) match {
           case (Right(asConstExprT), Right(asConstTypeT)) =>
             asConstTypeT.sort match {
               case Core.ArraySort(domSort, rangeSort) =>
@@ -383,10 +424,10 @@ object VMTParser {
         }
       case INode(List(INode(List(Leaf(ParseValue.PTerm("as")), asType)), asTypeExpr)) =>
         /* (as (Int Int) 0) */
-        translateAsExpr(typeEnv, interpEnv)(asType, asTypeExpr)
+        parseAsExpr(typeEnv, interpEnv)(asType, asTypeExpr)
       case INode(List(asTypeExpr, INode(List(Leaf(ParseValue.PTerm("as")), asType)))) =>
         /* (0 (as Int Int)) */
-        translateAsExpr(typeEnv, interpEnv)(asType, asTypeExpr)
+        parseAsExpr(typeEnv, interpEnv)(asType, asTypeExpr)
       case INode(Leaf(ParseValue.PTerm(funcCall)) :: args) =>
         // TODO: correct parsing of datatype constructor recognizers and accessors.
         // TODO | To correctly parse accessor names, we need to maintain a global table
@@ -468,307 +509,9 @@ object VMTParser {
     }
   }
 
-  def parseConstructor(typeEnv: TypeEnv)(t: ParseTree): Either[(String, ParseTree), Core.Constructor] = {
-    t match {
-      case Leaf(ParseValue.PTerm(enumConstructor)) =>
-        Right(Core.Constructor(enumConstructor, List()))
-      case INode(Leaf(ParseValue.PTerm(constructorName)) :: constructorArgs) =>
-        constructorArgs.traverse(translateSort(typeEnv)) match {
-          case Right(constructorSorts) =>
-            // Seems like the SMTLIB standard does not support named arguments to constructors
-            // but Z3 API does.
-            Right(Constructor(constructorName, constructorSorts.zipWithIndex.map(x => (s"c_${x._2}", x._1))))
-          case Left(reason) =>
-            Left(reason._1, t)
-        }
-      case _ =>
-        Left("invalid constructor declaration", t)
+  override def apply(typeEnv: TypeEnv, interpEnv: InterpEnv)(a: ParseTree): Either[String, Core.BoxedExpr] =
+    parseFormula(typeEnv, interpEnv)(a) match {
+      case Right(parsed) => Right(parsed)
+      case Left(error) => Left(error.toString)
     }
-  }
-
-  // TODO: handling of parametricity here is a bit buggy. Need to rethink.
-  @tailrec
-  def parseConstructors(typeEnv: TypeEnv)(ts: List[ParseTree]): Either[(String, List[ParseTree]), List[Core.Constructor]] = {
-    ts match {
-      case Leaf(ParseValue.PTerm("par")) :: INode(parametricTypes) :: rest => {
-        parametricTypes.traverse {
-          case Leaf(ParseValue.PTerm(param)) => Some(param)
-          case _ => None
-        } match {
-          case Some(params) =>
-            parseConstructors(typeEnv ++@ (params.map(x => (x, Core.UnInterpretedSort(x, 0).box)).toEnv))(rest)
-          case None =>
-            Left("parametric declare-datatype statement's parameters malformed", ts)
-        }
-      }
-      case List(Leaf(ParseValue.PTerm(constructorName))) =>
-        Right(List(Core.Constructor(constructorName, List())))
-      case constructorDecls =>
-        constructorDecls.traverse(parseConstructor(typeEnv)) match {
-          case Right(cons) => Right(cons)
-          case Left(reason) => Left(reason._1, ts)
-        }
-    }
-  }
-
-  @tailrec
-  def parse(pts: PreTransitionSystem)(t: ParseTree): Either[(String, ParseTree), PreTransitionSystem] = {
-    val typeEnv = pts.getTypeEnv
-    val interpEnv = pts.getInterpEnv
-    t match {
-      case INode(List(Leaf(ParseValue.PTerm("declare-sort")), Leaf(ParseValue.PTerm(sortName)), Leaf(ParseValue.PNumber(0)))) =>
-        typeEnv.add(sortName, Core.UnInterpretedSort(sortName, 0))
-        Right(pts)
-      case INode(List(Leaf(ParseValue.PTerm("declare-sort")), Leaf(ParseValue.PTerm(sortName)), Leaf(ParseValue.PNumber(arity)))) =>
-        typeEnv.add(sortName, Core.UnInterpretedSort(sortName, arity))
-        Right(pts)
-      case INode(List(Leaf(ParseValue.PTerm("declare-sort")), Leaf(ParseValue.PTerm(sortName)))) =>
-        typeEnv.add(sortName, Core.UnInterpretedSort(sortName, 0))
-        Right(pts)
-      case INode(List(Leaf(ParseValue.PTerm("declare-datatype")), Leaf(ParseValue.PTerm(name)), INode(datatypeArgs))) =>
-        parseConstructors(typeEnv)(datatypeArgs).map { constructors =>
-          val nd = Core.DatatypeConstructorSort(name, constructors)
-          typeEnv.add(name, nd)
-          pts
-        }.updateError(t)
-      case INode(List(Leaf(ParseValue.PTerm("declare-const")), Leaf(ParseValue.PTerm(symbolName)), sort)) =>
-        translateSort(typeEnv)(sort).map { sortT =>
-          interpEnv.add(symbolName, Core.mkVar(symbolName, sortT))
-          pts
-        }
-      case INode(List(Leaf(ParseValue.PTerm("define-const")), Leaf(ParseValue.PTerm(symbolName)), sort, expr)) =>
-        (translateSort(typeEnv)(sort), translateFormula(typeEnv, interpEnv)(expr)).tupled.map { (sortT, exprT) =>
-          interpEnv.add(symbolName, exprT)
-          pts
-        }
-      // arbitrary declare-fun commands must be parsed last
-      case INode(List( // state variables
-      Leaf(ParseValue.PTerm("declare-fun")),
-      Leaf(ParseValue.PTerm(name)),
-      INode(List()),
-      retSort)) =>
-        translateSort(typeEnv)(retSort).map { r =>
-          interpEnv.add(name, Core.BoxedExpr.make(r.sort, Var(name, r.sort)))
-          pts
-        }
-      case INode(List( // next-state definitions
-      Leaf(ParseValue.PTerm("define-fun")),
-      Leaf(ParseValue.PTerm(_name)),
-      INode(List()),
-      retSort,
-      INode(List(
-      Leaf(ParseValue.PTerm("!")),
-      Leaf(ParseValue.PTerm(currName)),
-      Leaf(ParseValue.PTerm(":next")),
-      Leaf(ParseValue.PTerm(nextName))
-      ))
-      )) =>
-        // Next-state variables are also stored in interpEnv.
-        // Instead of assigning them actual valuations, we simply treat them as
-        // variables.
-        translateSort(typeEnv)(retSort) match {
-          case Right(r) =>
-            interpEnv(nextName) match {
-              case Some(expr) =>
-                interpEnv.add(nextName, Core.mkVar(nextName, expr.sort))
-                val stateVar = TimedVariable(currName, nextName, 0, expr.sort.box)
-                pts.addStateVar(stateVar)
-                Right(pts)
-              case None =>
-                Left(s"next-state variable ${nextName} has no corresponding current-state ${currName} in environment", t)
-            }
-          case Left(reason) => Left(reason)
-        }
-      case INode(List( // action booleans
-      Leaf(ParseValue.PTerm("define-fun")),
-      Leaf(ParseValue.PTerm(_name)),
-      INode(List()),
-      retSort,
-      INode(List(
-      Leaf(ParseValue.PTerm("!")),
-      Leaf(ParseValue.PTerm(actName)),
-      Leaf(ParseValue.PTerm(":action")),
-      Leaf(_)
-      ))
-      )) =>
-        translateSort(typeEnv)(retSort).map(_ =>
-          pts.addAction(actName)
-          pts
-        )
-      case INode(List( // initial condition
-      Leaf(ParseValue.PTerm("define-fun")),
-      Leaf(ParseValue.PTerm("init")),
-      INode(List()),
-      retSort,
-      INode(List(
-      Leaf(ParseValue.PTerm("!")),
-      fmla,
-      Leaf(ParseValue.PTerm(":init")),
-      Leaf(_)
-      ))
-      )) =>
-        println(s"***init-state formula: ${fmla.toString}")
-        (translateSort(typeEnv)(retSort), translateFormula(typeEnv, interpEnv)(fmla)).tupled match {
-          case Right(bs, f) if bs.sort == BoolSort() =>
-            f.unify(BoolSort()) match {
-              case Some(bf) =>
-                pts.setInit(bf)
-                Right(pts)
-              case None =>
-                Left("initial condition ill-typed, not a boolean", t)
-            }
-          case Right(otherSort, _) =>
-            Left(s"initial condition ill-typed, is ${otherSort} but not a boolean", t)
-          case Left(reason) => Left(s"define-fun expression for initial condition is malformed, reason: ${reason}", t)
-        }
-      case INode(List( // the transition relation
-      Leaf(ParseValue.PTerm("define-fun")),
-      Leaf(ParseValue.PTerm("trans")),
-      INode(List()),
-      retSort,
-      INode(List(
-      Leaf(ParseValue.PTerm("!")),
-      fmla,
-      Leaf(ParseValue.PTerm(":trans")),
-      Leaf(_)
-      ))
-      )) =>
-        (translateSort(typeEnv)(retSort), translateFormula(typeEnv, interpEnv)(fmla)).tupled match {
-          case Right(bs, f) if bs.sort == BoolSort() =>
-            f.unify(BoolSort()) match {
-              case Some(bf) =>
-                pts.setTrans(bf)
-                Right(pts)
-              case None => Left("transition formula ill-typed, not a boolean", t)
-            }
-          case Right(otherSort, _) => Left(s"transition formula ill-typed: sort ${otherSort} not a boolean", t)
-          case Left(reason) => Left(s"define-fun for transition formula malformed, reason: ${reason}", t)
-        }
-
-      case INode(List( // assumptions in SMTLIB
-      Leaf(ParseValue.PTerm("assert")),
-      fmla
-      )) =>
-        translateFormula(typeEnv, interpEnv)(fmla) match {
-          case Right(f) =>
-            f.unify(BoolSort()) match {
-              case Some(bf) =>
-                pts.addAssertion(bf)
-                Right(pts)
-              case None => Left(s"(assert ...) statement ill-typed, not a boolean but ${f.sort}", t)
-            }
-          case Left(reason) => Left(s"(assert ...) parse error: " + reason._1, reason._2)
-        }
-      case INode(List( // liveness assumptions
-      Leaf(ParseValue.PTerm("define-fun")),
-      Leaf(ParseValue.PTerm(_name)),
-      INode(List()),
-      retSort,
-      INode(List(
-      Leaf(ParseValue.PTerm("!")),
-      fmla,
-      Leaf(ParseValue.PTerm(":react_p")),
-      _
-      ))
-      )) =>
-        (translateSort(typeEnv)(retSort), translateFormula(typeEnv, interpEnv)(fmla)).tupled match {
-          case Right(bs, f) if bs.sort == BoolSort() =>
-            f.unify(BoolSort()) match {
-              case Some(bf) =>
-                pts.addLiveAssumption(bf)
-                Right(pts)
-              case None =>
-                Left(s"Liveness assumption ill-typed: ${f.sort} but not boolean", t)
-            }
-          case Right(sort, _) =>
-            Left(s"liveness assumption ill-typed, ${sort} not a boolean", t)
-          case Left(reason) => Left(s"malformed :react_p equation, reason: ${reason}", t)
-        }
-      case INode(List( // liveness assertions
-      Leaf(ParseValue.PTerm("define-fun")),
-      Leaf(ParseValue.PTerm(_name)),
-      INode(List()),
-      retSort,
-      INode(List(
-      Leaf(ParseValue.PTerm("!")),
-      fmla,
-      Leaf(ParseValue.PTerm(":react_q")),
-      _
-      ))
-      )) =>
-        (translateSort(typeEnv)(retSort), translateFormula(typeEnv, interpEnv)(fmla)).tupled match {
-          case Right(bs, f) if bs.sort == BoolSort() =>
-            f.unify(BoolSort()) match {
-              case Some(bf) =>
-                pts.addLiveAssertion(bf)
-                Right(pts)
-              case None =>
-                Left(s"liveness assertion ill-typed: ${f.sort} is not a boolean", t)
-            }
-          case Right(sort, _) =>
-            Left(s"liveness assertion ill-typed, ${sort} not a boolean", t)
-          case Left(_) =>
-            Left("malformed :react_q equation", t)
-        }
-
-      case INode(List( // fairness assumptions
-      Leaf(ParseValue.PTerm("define-fun")),
-      Leaf(ParseValue.PTerm(_name)),
-      INode(List()),
-      retSort,
-      INode(List(
-      Leaf(ParseValue.PTerm("!")),
-      fmla,
-      Leaf(ParseValue.PTerm(":react_r")),
-      _
-      ))
-      )) =>
-        (translateSort(typeEnv)(retSort), translateFormula(typeEnv, interpEnv)(fmla)).tupled match {
-          case Right(bs, f) if bs.sort == BoolSort() =>
-            f.unify(BoolSort()) match {
-              case Some(bf) =>
-                pts.addFairness(bf)
-                Right(pts)
-              case None => Left(s"fairness assumption ill-typed: ${f.sort} is not boolean", t)
-            }
-          case Right(sort, _) =>
-            Left(s"ill-typed fairness assumption: ${sort} not boolean", t)
-          case Left(_) =>
-            Left("malformed :react_r", t)
-        }
-      //
-      // arbitrary function definitions and declarations, must be parsed last after all attributed declarations above.
-      //
-      case INode(List(
-      Leaf(ParseValue.PTerm("declare-fun")),
-      Leaf(ParseValue.PTerm(name)),
-      INode(argsSorts),
-      retSort
-      )) =>
-        (argsSorts.traverse(translateSort(typeEnv)), translateSort(typeEnv)(retSort)).tupled.onSuccess {
-          (argSortsT, retSortT) =>
-            val declareFunSort = Core.funSort(argSortsT, retSortT)
-            val declareFunExpr = BoxedExpr.make(declareFunSort, Var(name, declareFunSort))
-            interpEnv.add(name, declareFunExpr)
-            Right(pts)
-        }
-      case INode(List(Leaf(ParseValue.PTerm("define-fun")), Leaf(ParseValue.PTerm(name)), INode(argsSorts), retSort, body)) =>
-        parseSortedArgs(typeEnv, interpEnv)(argsSorts).onSuccess { translatedSorts =>
-          translateSort(typeEnv)(retSort).onSuccess { translatedRetSort =>
-            translateFormula(typeEnv, interpEnv)(body).onSuccess { bodyT =>
-              val domSortsT = translatedSorts.map(x => x._2)
-              val funSort = Core.FunSort(domSortsT, translatedRetSort.sort)
-              val funExpr = BoxedExpr.make(Core.funSort(domSortsT, bodyT.sort),
-                Core.mkMacro(name, translatedSorts, bodyT.e))
-              interpEnv.add(name, funExpr)
-              Right(pts)
-            }
-          }
-        }
-      case INode(List(INode(inner))) => parse(pts)(INode(inner)) // when there are redundant nestings
-      case _ =>
-        Left("Error: parse(...): cannot convert AST " + t.toString, t)
-    }
-  }
-
 }

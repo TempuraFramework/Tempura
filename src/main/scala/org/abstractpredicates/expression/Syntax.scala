@@ -160,6 +160,27 @@ object Syntax {
       case _ => None
   }
 
+  object Globally {
+    def unapply(e: BoxedExpr): Option[Expr[BoolSort]] = e.e match {
+      case Core.Uop("globally", gBody, Core.BoolSort()) =>
+        Some(gBody.asInstanceOf[Expr[BoolSort]])
+      case _ => None
+    }
+  }
+  
+  object Eventually {
+    def unapply(e: BoxedExpr): Option[Expr[BoolSort]] = e.e match {
+      case Core.Uop("eventually", eBody, Core.BoolSort()) =>
+        Some(eBody.asInstanceOf[Expr[BoolSort]])
+      case _ => None
+    }
+  }
+
+  object BoolExpr {
+    def unapply(e: BoxedExpr): Option[Expr[BoolSort]] =
+      e.unify(Core.boolSort)
+  }
+
   // Conversion between integers and our own Numeric sort-values
   given intToNumber: Conversion[Int, Expr[Core.NumericSort]] with
     override def apply(x: Int): Expr[NumericSort] =

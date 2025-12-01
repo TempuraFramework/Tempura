@@ -1,8 +1,8 @@
 import de.uni_freiburg.informatik.ultimate.logic.{Logics, Sort, TermVariable}
 import de.uni_freiburg.informatik.ultimate
 import org.abstractpredicates.expression.Core.{ArraySort, BoolSort, NumericSort, Sort}
-import org.abstractpredicates.parsing.ast.ParseTree.INode
-import org.abstractpredicates.parsing.ast.VMTParser
+import org.abstractpredicates.parsing.sexpr.ParseTree.INode
+import org.abstractpredicates.parsing.sexpr.VMTParser
 import org.abstractpredicates.transitions.TransitionSystem
 import org.abstractpredicates.smt.Z3Solver
 
@@ -13,7 +13,7 @@ object main {
 
   import org.abstractpredicates.expression._
   import Core.Expr
-  import org.abstractpredicates.parsing.parsers.StringToSExprParser
+  import org.abstractpredicates.parsing.sexpr.StringToSExprParser
   import org.abstractpredicates.repl.TempuScriptMain
 
   @main def hello() : Int =

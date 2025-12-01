@@ -1,7 +1,8 @@
 package org.abstractpredicates.parsing
 
-import org.abstractpredicates.parsing.io.TransitionSystemReader
-import org.abstractpredicates.parsing.parsers.StringToSExprParser
+import org.abstractpredicates.helpers.{ReplRegistry, Transforms}
+import org.abstractpredicates.parsing.io.{PathOf, SexprReader, StringReader, TDLReader, VMTReader}
+import org.abstractpredicates.parsing.sexpr.StringToSExprParser
 import org.scalatest.funsuite.AnyFunSuite
 
 class ParserTests2 extends AnyFunSuite {
@@ -36,19 +37,20 @@ class ParserTests2 extends AnyFunSuite {
   }
 
   test("read entire VMT file string to SExpr") {
-    StringToSExprParser.setInput(test0)
-    StringToSExprParser.transformInput match {
-      case Some(x) =>
+    StringToSExprParser(test0) match {
+      case Right(x) =>
         println(s"successfully parsed: ${x}")
         assert(true)
-      case None => assert(false)
+      case Left(err) =>
+        println(s"exception: ${err}")
+        assert(false)
     }
   }
 
   test("read entire VMT file string and compare it with test0") {
-    val reader = TransitionSystemReader("examples/ranking_infer1.vmt")
-    reader.readString match {
-      case Right(inputString) =>
+    Transforms.pipeline[String](List(PathOf.box, StringReader.box))("examples/ranking_infer1_trimmed.vmt") match {
+      case Right(input) =>
+        val inputString = input.asInstanceOf[String]
         println("Read input: " + inputString)
         if inputString != test0 then
           println(s"***** DIFF **** \n ${diffFast(inputString, test0)}\n")
@@ -60,9 +62,9 @@ class ParserTests2 extends AnyFunSuite {
   }
 
   test("read entire VMT file string and parse it into Sexpr") {
-    val reader = TransitionSystemReader("examples/ranking_infer1.vmt")
-    reader.readSexpr match {
-      case Right(inputSExpr) =>
+    Transforms.pipeline[String](List(PathOf.box, StringReader.box, StringToSExprParser.box))("examples/ranking_infer1_trimmed.vmt") match {
+      case Right(input) =>
+        val inputSExpr = input.asInstanceOf[String]
         println("Read input: " + inputSExpr)
         assert(true)
       case Left(error) =>
@@ -70,10 +72,9 @@ class ParserTests2 extends AnyFunSuite {
         assert(false)
     }
   }
-  
+
   test("read entire VMT file string and parse it into PreTransitionSystem") {
-    val reader = TransitionSystemReader("examples/ranking_infer1.vmt")
-    reader.readVMT match {
+    VMTReader("examples/ranking_infer1_trimmed.vmt")  match {
       case Right(pts) =>
         println("read input: " + pts.toString)
         assert(true)

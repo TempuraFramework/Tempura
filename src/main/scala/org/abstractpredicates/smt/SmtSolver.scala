@@ -130,14 +130,18 @@ object SmtSolver {
     val solver: Solver[LoweredTerm, LoweredVarDecl]
     
     def apply(): Solver[LoweredTerm, LoweredVarDecl] = solver
+    
+    def forkEnv() : SolverEnvironment = {
+      this.solver.fork().box
+    }
   }
 
   extension [LT, LVD](s: Solver[LT, LVD]) {
     def box: SolverEnvironment {type LoweredTerm = LT; type LoweredVarDecl = LVD} = {
       new SolverEnvironment {
-        type LoweredTerm = LT
-        type LoweredVarDecl = LVD
-        val solver: Solver[LT, LVD] = s
+        override type LoweredTerm = LT
+        override type LoweredVarDecl = LVD
+        override val solver: Solver[LT, LVD] = s
       }
     }
   }
@@ -178,6 +182,16 @@ object SmtSolver {
     //
     // A "declaring" action introduces declarations, but not axioms that constrain solver behavior. Essentially
     // a declared-but-undefined object is uninterpreted.
+    //
+    // Roughly speaking,
+    // during symbolic evaluation the following diagram commutes for a formula f
+    // over vocabulary V
+    // 
+    //  IR[f]  ------------ M.formula(V) --------> IR[V = M(V)]
+    //   |                                             |
+    //  lower                                        lift
+    //   |                                             |
+    //  LoweredTerm[f] ------ M.asTerm(V) ------> V = LoweredTerm[M(V)]
 
     // Compile sorts
     def lowerSort[A <: Core.Sort[A]](s: A): LoweredSort
@@ -276,8 +290,10 @@ object SmtSolver {
     def allSat(vocab: Set[(String, Core.BoxedSort)]): List[Model[LT, LVD]] = {
       var models: List[Model[LT, LVD]] = List()
 
+      println(s"ALLSAT: there are ${vocab.size} variables in the vocabulary: ${vocab.mkString(",\n")}")
+
       var stop = false
-      println("allSat: Starting allSat...")
+      // println("allSat: Starting allSat...")
       var counter = 0
 
       var conditions = List[LT]()
@@ -291,7 +307,7 @@ object SmtSolver {
             case Some(m) =>
               println(s"     allSat: got model ${m.toString}, round ${counter}")
               val blockingClause = m.asNegatedTerm(vocab)
-              println(s"=================== blocking condition: ======\n ${blockingClause.toString}\n==================")
+              //println(s"=================== blocking condition: ======\n ${blockingClause.toString}\n==================")
               conditions = blockingClause :: conditions
               addTerms(List(blockingClause))
               models = m :: models

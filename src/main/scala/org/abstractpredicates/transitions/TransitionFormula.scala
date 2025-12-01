@@ -60,11 +60,7 @@ object TransitionFormula {
             }
 
           val branchesP: List[Peeled.Branch] = branches map {
-            case Core.Bop[BoolSort
-            , BoolSort
-            , BoolSort
-            ] ("=>", a, b, BoolSort())
-            => Peeled.Branch(a, peel(b))
+            case Implies(a, b) => Peeled.Branch(a, peel(b))
             case d => failwith(s"impossible ${d}")
           }
 

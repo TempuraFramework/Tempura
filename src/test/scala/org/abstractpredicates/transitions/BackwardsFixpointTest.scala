@@ -3,8 +3,8 @@ package org.abstractpredicates.transitions
 import org.scalatest.funsuite.AnyFunSuite
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.expression.Syntax.*
-import org.abstractpredicates.helpers.{DotPrinter, FormulaPrinter}
 import org.abstractpredicates.helpers.Utils.*
+import org.abstractpredicates.parsing.printers.{DotPrinter, FormulaPrinter}
 import org.abstractpredicates.smt.SmtSolver.*
 import org.abstractpredicates.smt.{SmtSolver, Z3Solver}
 
@@ -48,12 +48,13 @@ class BackwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0",trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(liveAssertion),
+      liveProperties = List(("live0", liveAssertion)),
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )
@@ -107,12 +108,13 @@ class BackwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar0, timedVar1),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0", trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(liveAssertion),
+      liveProperties = List(("live0", liveAssertion)),
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )
@@ -151,12 +153,13 @@ class BackwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0",trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(liveAssertion),
+      liveProperties = List(("live0",liveAssertion)),
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )
@@ -209,12 +212,13 @@ class BackwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar0, timedVar1),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0",trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(liveAssertion),
+      liveProperties = List(("live0",liveAssertion)),
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )
@@ -261,7 +265,7 @@ class BackwardsFixpointTest extends AnyFunSuite {
           s"${x}: ${graph.labelOf(x).toString}"
         ),
         Some(e =>
-          s"${FormulaPrinter.ExprPrinter(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))()}"
+          s"${FormulaPrinter(trs.typeEnv, trs.interpEnv)(graph.labelOf(e._1, e._3).getOrElse(Core.mkTrue))}"
         ))
 
     graphPrinter.visualizeDOT(None, true)
@@ -368,12 +372,13 @@ class BackwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0", trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(liveAssertion),
+      liveProperties = List(("live0", liveAssertion)),
       liveAssumptions = List(),
-      fairness = List(fairnessCondition),
+      fairAssumptions = List(("fair0", fairnessCondition)),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )
@@ -407,12 +412,13 @@ class BackwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0",trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(), // Empty!
+      liveProperties = List(), // Empty!
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )
@@ -429,6 +435,10 @@ class BackwardsFixpointTest extends AnyFunSuite {
     assert(stats.totalStates == 2, s"Expected 2 states, got ${stats.totalStates}")
   }
 
+  test("ranking_infer1.vmt") {
+    
+  }
+  
   test("theory axioms: constrained backward exploration") {
     val typeEnv = Core.emptyTypeEnv
     val interpEnv = Core.emptyInterpEnv
@@ -449,12 +459,13 @@ class BackwardsFixpointTest extends AnyFunSuite {
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
       init = init,
-      trans = trans,
-      assertions = List(),
+      trans = List(("trans0",trans)),
+      properties = List(),
       assumptions = List(),
-      liveAssertions = List(liveAssertion),
+      liveProperties = List(("liveprop0", liveAssertion)),
       liveAssumptions = List(),
-      fairness = List(),
+      fairAssumptions = List(),
+      theoryAxioms = List(),
       typeEnv = typeEnv,
       interpEnv = interpEnv
     )

@@ -9,8 +9,7 @@ import ammonite.terminal.TermState
 import java.io.OutputStreamWriter
 import scala.annotation.tailrec
 import org.abstractpredicates.helpers.Utils.|>
-import org.abstractpredicates.parsing.ast.ParseTree
-import org.abstractpredicates.parsing.parsers.StringToSExprParser
+import org.abstractpredicates.parsing.sexpr.{ParseTree, StringToSExprParser}
 import org.abstractpredicates.repl.TempuCommandResult.TempuCommandResultExit
 
 // The code below extends the Ammonite REPL code at
@@ -19,15 +18,11 @@ import org.abstractpredicates.repl.TempuCommandResult.TempuCommandResultExit
 
 object TempuScriptMain {
 
+
   private val state: TempuScriptState[ParseTree] = TempuScriptState[ParseTree]()
   private val dispatcher = TempuCommandDispatcher[ParseTree](state,
     Set(CommonCommands.HistoryCommandStateful(state),
-      CommonCommands.ParseSExprCommand(),
-      CommonCommands.ExitCommand(),
-      CommonCommands.ParseFormulaCommand(),
-      CommonCommands.VMTCommand(),
-      CommonCommands.ReadTransitionSystemCommand(),
-      CommonCommands.TypeOfSExprCommand()))
+      CommonCommands.ExitCommand()))
 
   private val selection = GUILikeFilters.SelectionFilter(indent = 4)
 
@@ -89,12 +84,12 @@ object TempuScriptMain {
         UndoFilter(),
         cutPaste,
         historyFilter,
-     //   multilineFilter,
-      //  selection,
-      //  BasicFilters.tabFilter(4),
-     //   GUILikeFilters.altFilter,
-     //   GUILikeFilters.fnFilter,
-      //  ReadlineFilters.navFilter,
+        multilineFilter,
+        selection,
+        BasicFilters.tabFilter(4),
+        GUILikeFilters.altFilter,
+        GUILikeFilters.fnFilter,
+        ReadlineFilters.navFilter,
         //        Example multiline support by intercepting Enter key
         BasicFilters.all
         // tab-completion filter
@@ -131,9 +126,8 @@ object TempuScriptMain {
         (1, "Error processing Ammonite readline filters. Bye!")
       case Some(s) =>
         var (toExit, exitSt, exitCode) = (false, "", 0)
-        StringToSExprParser.setInput(s)
-        StringToSExprParser.transformInput match {
-          case Some(List(ParseTree.INode(parsedInput))) =>
+        StringToSExprParser(s) match {
+          case Right(List(ParseTree.INode(parsedInput))) =>
             dispatcher.dispatch(parsedInput) match {
               case TempuCommandResult.TempuCommandResultSuccess(s) =>
                 if s != "" then success(s)
@@ -143,7 +137,7 @@ object TempuScriptMain {
                 exitSt = st
                 exitCode = code
             }
-          case Some(List()) => ()
+          case Right(List()) => ()
           case _ =>
             error(s"malformed input s-expression ${s}")
         }

@@ -1,16 +1,14 @@
 package org.abstractpredicates.parsing
 
 import org.abstractpredicates.expression.Core
-import org.abstractpredicates.parsing.ast.{ParseTree, VMTParser}
-import org.abstractpredicates.parsing.parsers.StringToSExprParser
+import org.abstractpredicates.parsing.sexpr.{ParseTree, StringToSExprParser, VMTParser}
 import org.abstractpredicates.transitions.PreTransitionSystem
 import org.scalatest.funsuite.AnyFunSuite
-
+import org.abstractpredicates.helpers.Utils.*
 class VMTParserTests extends AnyFunSuite {
 
   private def sexprs(s: String) : List[ParseTree] = {
-    StringToSExprParser.setInput(s)
-    StringToSExprParser.transformInput.get
+    StringToSExprParser(s).getOrElse(failwith(s"error: couldn't parse expression: ${s}"))
   }
 
   test("parse declare-fun expression with empty domain ")  {
@@ -19,7 +17,7 @@ class VMTParserTests extends AnyFunSuite {
     sexprs(s) foreach {
       x =>
         println(s"parsing ${x}: ")
-        VMTParser.parse(pts)(x) match {
+        VMTParser.parse(Core.emptyTypeEnv, Core.emptyInterpEnv)(pts)(x) match {
           case Right(answer) => println(answer);
             val xFun = answer.getInterpEnv("x").get
             print(s"x = ${xFun}")
@@ -35,7 +33,7 @@ class VMTParserTests extends AnyFunSuite {
     sexprs(s) foreach {
       x =>
         println(s"parsing ${x}: ")
-        VMTParser.parse(pts)(x) match {
+        VMTParser.parse(Core.emptyTypeEnv, Core.emptyInterpEnv)(pts)(x) match {
           case Right(answer) =>
             println(answer)
             val xFun = answer.getInterpEnv("x").get
@@ -53,7 +51,7 @@ class VMTParserTests extends AnyFunSuite {
     sexprs(s) foreach {
       x =>
         println(s"parsing ${x}: ")
-        VMTParser.parse(pts)(x) match {
+        VMTParser.parse(Core.emptyTypeEnv, Core.emptyInterpEnv)(pts)(x) match {
           case Right(answer) => println(answer)
             val xFun = answer.getInterpEnv("x").get
             print(s"x = ${xFun.toString}")
@@ -72,7 +70,7 @@ class VMTParserTests extends AnyFunSuite {
     sexprs(init) foreach {
       x =>
         println(s"parsing ${x}: ")
-        VMTParser.parse(pts)(x) match {
+        VMTParser.parse(Core.emptyTypeEnv, Core.emptyInterpEnv)(pts)(x) match {
           case Right(answer) => println(answer)
             assert(true)
           case Left(reason) => println(reason); assert(false)

@@ -89,6 +89,7 @@ class LabeledGraph[NodeLabel, EdgeLabel] {
     if reverseNodeList(to).isEmpty then sinkNodes += to
   }
 
+  def hasEdge(from: Vertex, to: Vertex): Boolean = edgeLabel.contains((from, to))
   def labelOf(node: Vertex) : Option[NodeLabel] = nodeLabel.get(node)
   def labelOf(from: Vertex, to: Vertex): Option[EdgeLabel] = edgeLabel.get((from, to))
   def successors(from: Vertex): Option[MS[Vertex]] = nodeList.get(from)
@@ -97,4 +98,19 @@ class LabeledGraph[NodeLabel, EdgeLabel] {
   def sinks: MS[Vertex] = sinkNodes
   def allNodes: List[Vertex] = nodeLabel.keys.toList
   def allEdges: MS[(Vertex, EdgeLabel, Vertex)] = edgeList
+}
+
+trait BoxedLabeledGraph {
+  type NodeLabel
+  type EdgeLabel
+  val graph: LabeledGraph[NodeLabel, EdgeLabel]
+}
+
+object BoxedLabeledGraph {
+  def make[N, E](g: LabeledGraph[N, E]) =
+    new BoxedLabeledGraph {
+      override type NodeLabel = N 
+      override type EdgeLabel = E 
+      override val graph = g
+    }
 }

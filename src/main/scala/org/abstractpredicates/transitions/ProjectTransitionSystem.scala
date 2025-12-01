@@ -2,6 +2,7 @@ package org.abstractpredicates.transitions
 
 import org.abstractpredicates.expression.Core
 
+// TODO
 class ProjectTransitionSystem(transitionSystem: TransitionSystem) {
 
   private val projectedSorts = Core.emptyTypeEnv

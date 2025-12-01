@@ -1,4 +1,4 @@
-package org.abstractpredicates.parsing.ast
+package org.abstractpredicates.parsing.sexpr
 
 //sealed trait Tree
 

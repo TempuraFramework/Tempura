@@ -24,8 +24,8 @@ object SmtLibSolver {
 
     override type LoweredSort = String
 
-    private val sortCache: mutable.Map[Core.BoxedSort, String] = mutable.Map()
-    private val exprCache: mutable.Map[Core.BoxedExpr, String] = mutable.Map()
+    private val sortMap: mutable.Map[Core.BoxedSort, String] = mutable.Map()
+    private val exprMap: mutable.Map[Core.BoxedExpr, String] = mutable.Map()
     private val declarations: mutable.ListBuffer[String] = mutable.ListBuffer()
     private val assertions: mutable.ListBuffer[String] = mutable.ListBuffer()
     private val history: mutable.ListBuffer[String] = mutable.ListBuffer()
@@ -52,7 +52,7 @@ object SmtLibSolver {
     })
 
     private def lowerSortName[A <: Core.Sort[A]](sort: A): String =
-      sortCache.getOrElseUpdate(sort.box, sort match {
+      sortMap.getOrElseUpdate(sort.box, sort match {
         case _: Core.BoolSort => "Bool"
         case _: Core.NumericSort => "Int"
         case Core.ArraySort(domain, range) => s"(Array ${lowerSort(domain)} ${lowerSort(range)})"
@@ -78,7 +78,7 @@ object SmtLibSolver {
           val cmd = s"(declare-sort ${uninterpreted.sortName} ${uninterpreted.numArgs})"
           declarations.addOne(cmd)
           appendHistory(cmd)
-          sortCache.update(s.box, uninterpreted.sortName)
+          sortMap.update(s.box, uninterpreted.sortName)
           uninterpreted.sortName
         case alias @ Core.AliasSort(name, args, underlying) =>
           // Generate define-sort command
@@ -88,7 +88,7 @@ object SmtLibSolver {
           val cmd = s"(define-sort ${name}${argsStr} ${underlyingSortStr})"
           declarations.addOne(cmd)
           appendHistory(cmd)
-          sortCache.update(s.box, name)
+          sortMap.update(s.box, name)
           name
         case finite: Core.FiniteUniverseSort =>
           // Generate datatype declaration for finite universe (as enum)
@@ -96,7 +96,7 @@ object SmtLibSolver {
           val cmd = s"(declare-datatypes ((${finite.sortName} 0)) ((${constructors})))"
           declarations.addOne(cmd)
           appendHistory(cmd)
-          sortCache.update(s.box, finite.sortName)
+          sortMap.update(s.box, finite.sortName)
           finite.sortName
         case datatype: Core.DatatypeConstructorSort =>
           // Generate datatype declaration
@@ -112,7 +112,7 @@ object SmtLibSolver {
           val cmd = s"(declare-datatypes ((${datatype.sortName} 0)) ((${constructorStrs})))"
           declarations.addOne(cmd)
           appendHistory(cmd)
-          sortCache.update(s.box, datatype.sortName)
+          sortMap.update(s.box, datatype.sortName)
           datatype.sortName
         case fun: Core.FunSort[?] =>
           unsupported(s"function sort definition not supported in SMT-LIB printer: ${fun}")
@@ -203,28 +203,37 @@ object SmtLibSolver {
 
     override def lower[S <: Core.Sort[S]](expr: Core.Expr[S]): String = {
       val boxed = expr.box()
-      exprCache.get(boxed) match {
+      exprMap.get(boxed) match {
         case Some(rendered) => rendered
         case None =>
           val lowered = lower(Map.empty)(expr)
-          exprCache.update(boxed, lowered)
+          exprMap.update(boxed, lowered)
           lowered
       }
     }
 
     private def lower[S <: Core.Sort[S]](bound: Map[String, String])(expr: Core.Expr[S]): String = expr match {
       case Core.Var(name, _) => bound.getOrElse(name, name)
-      case Core.Const(sortValue) => lowerValue(sortValue)
+      case Core.Const(sortValue) =>
+        sortValue match {
+          case Core.SortValue.DatatypeValue(instantiatedCons, _) =>
+            val consName = instantiatedCons.constructor.name
+            val args = instantiatedCons.params.map(p => lower(bound)(p.e))
+            if args.isEmpty then
+              consName
+            else
+              s"(${consName} ${args.mkString(" ")})"
+          case _ => lowerValue(sortValue)
 
+        }
       // Binary operators
       case Core.Bop(op, lhs, rhs, _) => s"(${op} ${lower(bound)(lhs)} ${lower(bound)(rhs)})"
 
       // Unary operators
-      case Core.Uop(op, sub, _) => s"(${op} ${lower(bound)(sub)})"
       case Core.Uop("as-array", lambdaExpr, _) =>
         // (as const (Array D R)) for constant arrays represented as lambdas
-        unsupported("as-array lowering not fully supported in SMT-LIB printer")
-
+        unsupported("as-array lowering not fully supported in generic SMTLib Solver backend")
+      case Core.Uop(op, sub, _) => s"(${op} ${lower(bound)(sub)})"
       // List operators (and, or, +, *, etc.)
       case Core.Lop(op, args, _, _) => s"(${op} ${args.map(lower(bound)).mkString(" ")})"
 
@@ -272,15 +281,6 @@ object SmtLibSolver {
       // Macros should not appear standalone
       case Core.Macro(name, _, _) =>
         unsupported(s"cannot treat a function symbol ${name} as an expression in SMT-LIB printer")
-
-      // Datatype operations - DatatypeValue appears as a Const
-      case Core.Const(Core.SortValue.DatatypeValue(instantiatedCons, _)) =>
-        val consName = instantiatedCons.constructor.name
-        val args = instantiatedCons.params.map(p => lower(bound)(p.e))
-        if args.isEmpty then
-          consName
-        else
-          s"(${consName} ${args.mkString(" ")})"
 
       case Core.DatatypeConstructorRecognizer(dt, consName, arg) =>
         s"(is-${consName} ${lower(bound)(arg)})"

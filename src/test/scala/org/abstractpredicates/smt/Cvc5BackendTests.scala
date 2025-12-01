@@ -12,6 +12,8 @@ class Cvc5BackendTests extends AnyFunSuite {
   private def freshSolver() = {
     val typeEnv = Core.emptyTypeEnv
     val interpEnv = Core.emptyInterpEnv
+    val solver = Cvc5Solver.Cvc5Solver(typeEnv, interpEnv)
+    solver.initialize(SmtSolver.allLia)
     (typeEnv, interpEnv, Cvc5Solver.Cvc5Solver(typeEnv, interpEnv))
   }
 

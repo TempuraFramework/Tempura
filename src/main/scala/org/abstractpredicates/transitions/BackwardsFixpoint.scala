@@ -5,12 +5,13 @@ import org.abstractpredicates.smt.SmtSolver.{Model, Result, Solver, SolverEnviro
 import org.abstractpredicates.expression.{Core, VariableRenamer}
 import org.abstractpredicates.transitions.States.{State, States}
 import org.abstractpredicates.expression.Syntax.*
+import org.abstractpredicates.parsing.printers.FormulaPrinter
 
 import scala.collection.mutable.{Map as MMap, Queue as MQueue, Set as MSet}
 
 class BackwardsFixpoint(val trs: TransitionSystem,
                         val solverEnv: SolverEnvironment,
-                        val theoryAxioms: List[solverEnv.LoweredTerm], val disambiguate: Boolean ) {
+                        val theoryAxioms: List[solverEnv.LoweredTerm], val disambiguate: Boolean) {
 
   import BackwardsFixpoint.*
 
@@ -25,7 +26,7 @@ class BackwardsFixpoint(val trs: TransitionSystem,
 
   private val stateGraph: LabeledGraph[States.State, Core.Expr[Core.BoolSort]] = LabeledGraph[States.State, Core.Expr[Core.BoolSort]]()
 
-  private val stateCache: MMap[Core.Expr[Core.BoolSort], Int] = MMap()
+  private val stateCache: MMap[States.State, Int] = MMap()
 
   private val worklist: MQueue[(Int, States.State)] = MQueue()
 
@@ -34,7 +35,7 @@ class BackwardsFixpoint(val trs: TransitionSystem,
   private val ranking: MMap[Int, Int] = MMap()
 
   private lazy val combinedFairness: Option[Core.Expr[Core.BoolSort]] = {
-    trs.fairness match {
+    trs.fairAssumptions.map(x => x._2) match {
       case Nil => None
       case single :: Nil => Some(single)
       case many => Some(Core.mkAnd(many))
@@ -63,8 +64,6 @@ class BackwardsFixpoint(val trs: TransitionSystem,
     ignore(solver.addTerms(theoryAxioms))
     // Add transition system assumptions (safety assumptions)
     trs.insertAssumptions(solverEnv)
-    // Add liveness assumptions
-    trs.insertLivenessAssumptions(solverEnv)
   }
 
   def setMaxSteps(n: Int): Unit = {
@@ -82,29 +81,29 @@ class BackwardsFixpoint(val trs: TransitionSystem,
   }
 
   private def addStateToGraph(state: State): Int = {
-    val stateFormula = summarizeState(state)
-    stateCache.get(stateFormula) match {
+    stateCache.get(state) match {
       case Some(vertexId) =>
         // State already exists
         vertexId
-
       case None =>
         // New state: add to graph
         val vertexId = stateGraph.addNode(state)
-        stateCache.update(stateFormula, vertexId)
+        stateCache.update(state, vertexId)
         vertexId
     }
   }
 
+  // Initially compute the set of all states satisfying the liveness condition
   def computeLiveStates(): List[Int] = {
-    val liveFormula = trs.liveAssertions match {
-      case Nil =>
+    val liveFormula = trs.liveProperties.map(x => x._2) match {
+      case List(single) => single
+      case List() =>
         println("Warning: No liveness assertions defined, using 'true' (all states are live)")
         Core.mkTrue
-      case single :: Nil => single
-      case multiple => Core.mkAnd(multiple)
+      case _ =>
+        failwith("error: cannot handle multiple liveness properties for the same transition system instance yet")
     }
-
+    println(s"starting to compute live states... \n\n > liveFormula: ${FormulaPrinter(trs.typeEnv, trs.interpEnv)(liveFormula)} \n\n")
     val liveModels = computeAllSat(liveFormula)
 
     if liveModels.isEmpty then {
@@ -113,9 +112,8 @@ class BackwardsFixpoint(val trs: TransitionSystem,
     } else {
       println(s"Found ${liveModels.size} live states")
 
-      val stateVarsSet = trs.stateVars.toSet
       liveModels.map { model =>
-        val state = State(stateVarsSet, solverEnv, model)
+        val state = State(trs.stateVars, solverEnv, model)
         val vertexId = addStateToGraph(state)
         relax(vertexId, 0)
         vertexId
@@ -123,53 +121,36 @@ class BackwardsFixpoint(val trs: TransitionSystem,
     }
   }
 
+  // Given a state representing the next-state,
+  // create a conjunction of equalities over the next-state variables that describes the state.
   private def buildNextStateConstraints(state: State): Core.Expr[Core.BoolSort] = {
     val constraints = trs.stateVars.toList.flatMap { tvar =>
       val origName = tvar.getOriginalName
       val nextName = tvar.getNextState
       val sort = tvar.getSort
-      state.model.valueOf(origName, sort.sort).map(v => Core.mkEq(Core.mkVar(nextName, sort), v))
+      state.model.valueOf(origName, sort.sort).map(
+        constraint =>
+          println(s"   > next-state constraint of ${nextName}: ${constraint}")
+          Core.mkEq(Core.mkVar(nextName, sort), constraint))
     }
+    println(s"next-state constraints: ${constraints.map(x => FormulaPrinter(trs.typeEnv, trs.interpEnv)(x))}")
     if constraints.isEmpty then
       Core.mkTrue
     else
       Core.mkAnd(constraints)
   }
 
-  /**
-   * Compute all predecessor states from a given state.
-   *
-   * FIXED: Deduplicate models that represent the same state but differ only on
-   * non-state variables (like next-state variables or auxiliary variables).
-   */
   private def computePredecessors(state: State) = {
     val nextStateConstraints = buildNextStateConstraints(state)
-    val predecessorQuery = Core.mkAnd(List(trs.trans, nextStateConstraints))
+    val predecessorQuery = Core.mkAnd(List(trs.getTransition, nextStateConstraints))
+    println(s"predecessor query: ${FormulaPrinter(trs.typeEnv, trs.interpEnv)(predecessorQuery)} \n\n")
     val allModels = computeAllSat(predecessorQuery)
-
-    // Deduplicate: keep only models that differ on current state variables
-    val uniqueStates = scala.collection.mutable.Set[Core.Expr[Core.BoolSort]]()
-    val uniqueModels = allModels.filter { model =>
-      val stateFormula = summarizeModel(model)
-      if (uniqueStates.contains(stateFormula)) {
-        false  // Duplicate state, skip this model
-      } else {
-        uniqueStates.add(stateFormula)
-        true  // Unique state, keep this model
-      }
-    }
-
-    // Log deduplication stats
-    if (allModels.size != uniqueModels.size) {
-      println(s"    Deduplicated ${allModels.size} models to ${uniqueModels.size} unique states")
-    }
-
-    uniqueModels
+    //allModels.filter(model => !stateCache.contains(modelToState(model))) // TODO
+    allModels
   }
 
   private def modelToState(model: Model[solverEnv.LoweredTerm, solverEnv.LoweredVarDecl]): State = {
-    val stateVarsSet = trs.stateVars.toSet
-    State(stateVarsSet, solverEnv, model)
+    State(trs.stateVars, solverEnv, model)
   }
 
   def backwardStep(vertexId: Int, state: State): Unit = {
@@ -183,20 +164,33 @@ class BackwardsFixpoint(val trs: TransitionSystem,
 
     predecessorModels.foreach { predModel =>
       val predState = modelToState(predModel)
-      val predVertexId = addStateToGraph(predState)
-
-      // FIXED: Edge direction now represents the forward transition
-      // predState --trans--> currState
-      val edgeOpt = stateGraph.addEdge(predVertexId, vertexId, trs.trans)
+      val edge =
+        if stateCache.contains(predState) then {
+          val predVertexId = stateCache(predState)
+          println(s"  Predecessor of ${vertexId}: ${predVertexId} (previously added)")
+          stateGraph.labelOf(predVertexId, vertexId) match {
+            case Some(_) => (predVertexId, trs.getTransition, vertexId)
+            case None =>
+              println(s"   adding edge from ${vertexId} to ${predVertexId}")
+              val edgeOpt = stateGraph.addEdge(predVertexId, vertexId, trs.getTransition) // TODO: correct edge weight
+              edgeOpt.getOrElse((predVertexId, trs.getTransition, vertexId))
+          }
+        } else {
+          val predVertexId = addStateToGraph(predState)
+          println(s"  Predecessor of ${vertexId}: ${predVertexId}")
+          println(s"      Predecessor model Z3: ${predState.model.toString}")
+          println(s"      Predecessor model: ${predState.toString}  \n ---------> \n Current model: ${state.toString}")
+          val edgeOpt = stateGraph.addEdge(predVertexId, vertexId, trs.getTransition) // TODO: correct edge weight
+          edgeOpt.getOrElse((predVertexId, trs.getTransition, vertexId))
+        }
+      
       val fair = isFairEdge(predState, state)
-      edgeOpt.foreach { added =>
-        if fair then fairEdgesBuf.addOne(added)
-      }
+      if fair then fairEdgesBuf.addOne(edge)
 
       if currentRank != Int.MaxValue then
         val edgeCost = if fair then 1 else 0
         val candidate = currentRank + edgeCost
-        relax(predVertexId, candidate)
+        relax(edge._1, candidate)
     }
   }
 
@@ -205,12 +199,14 @@ class BackwardsFixpoint(val trs: TransitionSystem,
 
     while worklist.nonEmpty && (currStep < maxSteps || maxSteps < 0) do {
       val (vertexId, state) = worklist.dequeue()
+      println(s"explore: Exploring vertex ${vertexId}")
+      println(s"explore: State: ${state.toString}")
       backwardStep(vertexId, state)
       currStep += 1
     }
     if worklist.nonEmpty then {
       println(s"Warning: Exploration stopped at step ${currStep} (reached maxSteps=${maxSteps})")
-      println(s"         ${worklist.size} states remain unexplored")
+      println(s"         ${worklist.size} states remain unexplored on the worklist")
     } else {
       println(s"Exploration complete: visited ${ranking.size} states in ${currStep} steps")
     }
@@ -218,20 +214,17 @@ class BackwardsFixpoint(val trs: TransitionSystem,
 
   def run(): LabeledGraph[State, Core.Expr[Core.BoolSort]] = {
     initialize()
+    println(" ** backwardsFixpoint: starting ... ")
     val liveVertices = computeLiveStates()
+    println(s" ** LIVE STATES ** (${liveVertices.size} total)")
+    liveVertices.foreach(x => println(s"vertex ${x} --- state ${this.stateGraph.labelOf(x).toString}"))
+    println(" ****** LIVE STATES END *****")
     if liveVertices.isEmpty then {
       println("No live states found - cannot explore")
     } else {
       explore()
     }
     stateGraph
-  }
-
-  /**
-   * Check if a given state can reach a live state.
-   */
-  def isCoReachable(stateFormula: Core.Expr[Core.BoolSort]): Boolean = {
-    stateCache.contains(stateFormula)
   }
 
   /**
@@ -250,8 +243,7 @@ class BackwardsFixpoint(val trs: TransitionSystem,
     } else {
       // Check if any initial state is in the co-reachable set
       val reachableInitStates = initModels.filter { model =>
-        val stateFormula = summarizeModel(model)
-        isCoReachable(stateFormula)
+        stateCache.contains(modelToState(model))
       }
 
       if reachableInitStates.nonEmpty then {
@@ -264,46 +256,9 @@ class BackwardsFixpoint(val trs: TransitionSystem,
     }
   }
 
-  def getStatistics: ExplorationStats = {
-    ExplorationStats(
-      totalStates = stateGraph.allNodes.size,
-      totalEdges = stateGraph.allEdges.size,
-      explorationSteps = currStep,
-      unexploredStates = worklist.size
-    )
-  }
-
-  // Build formula representing a particular state
-  private def summarizeState(state: State): Core.Expr[Core.BoolSort] = {
-    val eqs = trs.stateVars.toList
-      .flatMap { tvar =>
-        val origName = tvar.getOriginalName
-        val sort = tvar.getSort
-        state.model.valueOf(origName, sort.sort).map(value => Core.mkEq(Core.mkVar(origName, sort), value))
-      }
-
-    if eqs.isEmpty then Core.mkTrue else Core.mkAnd(eqs)
-  }
-
-  /**
-   * State formula from a model with only variables we wish to keep track.
-   */
-  private def summarizeModel(model: Model[?, ?]): Core.Expr[Core.BoolSort] = {
-    val eqs = trs.stateVars.toList
-      .sortBy(_.getOriginalName)
-      .flatMap { tvar =>
-        val origName = tvar.getOriginalName
-        val sort = tvar.getSort
-        model.valueOf(origName, sort.sort).map { value =>
-          Core.mkEq(Core.mkVar(origName, sort), value)
-        }
-      }
-
-    if eqs.isEmpty then Core.mkTrue else Core.mkAnd(eqs)
-  }
 
   private def summarizeStatePrimed(state: State): Core.Expr[Core.BoolSort] = {
-    val summary = summarizeState(state)
+    val summary = state.summarize
     val renameMap: Map[String, String] =
       trs.stateVars.toList.map(tv => tv.getOriginalName -> tv.getNextState).toMap
     val renamer = new VariableRenamer(renameMap)
@@ -313,7 +268,7 @@ class BackwardsFixpoint(val trs: TransitionSystem,
   private def isFairEdge(pre: State, post: State): Boolean = combinedFairness match {
     case None => false
     case Some(fairCondition) =>
-      val currentSummary = summarizeState(pre)
+      val currentSummary = pre.summarize
       val nextPrimed = summarizeStatePrimed(post)
       val exptr = Core.mkAnd(List(currentSummary, nextPrimed))
       solver.push()
@@ -326,6 +281,15 @@ class BackwardsFixpoint(val trs: TransitionSystem,
   def getFairEdges: Set[(Int, Core.Expr[Core.BoolSort], Int)] = fairEdgesBuf.toSet
 
   def getRanking: Map[Int, Int] = ranking.toMap
+
+  def getStatistics: ExplorationStats = {
+    ExplorationStats(
+      totalStates = stateGraph.allNodes.size,
+      totalEdges = stateGraph.allEdges.size,
+      explorationSteps = currStep,
+      unexploredStates = worklist.size
+    )
+  }
 }
 
 object BackwardsFixpoint {
@@ -333,11 +297,11 @@ object BackwardsFixpoint {
    * Statistics collected during backward exploration.
    */
   case class ExplorationStats(
-    totalStates: Int,
-    totalEdges: Int,
-    explorationSteps: Int,
-    unexploredStates: Int
-  ) {
+                               totalStates: Int,
+                               totalEdges: Int,
+                               explorationSteps: Int,
+                               unexploredStates: Int
+                             ) {
     override def toString: String = {
       s"""Backwards Exploration Statistics:
          |  Total states: $totalStates

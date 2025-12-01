@@ -151,6 +151,8 @@ object Z3Solver {
       }
     }
 
+    def getVersion: String = this.version
+
     override def fork(): Z3Solver = {
       val newTypeEnv = getTypeEnv.copy()
       val newInterpEnv = getInterp.copy()
@@ -866,43 +868,48 @@ object Z3Solver {
                       funcMap.update(name, funcDecl)
                       Core.mkConst(Core.uninterpreted(name, uSort))
                     case _ =>
-                      val funcName = expr.getFuncDecl.getName
-                      val funcSort = Core.funSort(expr.getFuncDecl.getDomain.toList.map(liftSort), liftSort(expr.getFuncDecl.getRange).sort)
-                      val func = interpEnv(funcName.toString).getOrElse(unexpected(s"Error: applying function not-found ${funcName.toString}"))
-                      funcSort.unify(func.sort) match {
-                        case Some(_) =>
-                          func.e match {
-                            case mac @ Core.Macro(name, vars, bodyExpr) =>
-                              val varsEnv = vars.toArray
-                              val funcArgs = expr.getArgs.zipWithIndex.map((x, i) =>
-                                if x.isVar then {
-                                  val boundVarIdx = x.getIndex
-                                  val sort = liftSort(x.getSort).sort
-                                  // deBruijnStack(i) is the i-th indexed variable name.
-                                  assert(deBruijnStack.size > boundVarIdx)
-                                  val varName = deBruijnStack(boundVarIdx)
-                                  (varName, Core.mkVar(varName, sort).box())
-                                } else {
-                                  (varsEnv(i)._1, liftTerm(x.asInstanceOf[LoweredTerm]))
-                                }).toList
-                              Core.mkApp(funcArgs, mac)
-                            case v @ Core.Var(name, _) =>
-                              val funcArgs = expr.getArgs.zipWithIndex.map((x, i) =>
-                                if x.isVar then {
-                                  val boundVarIdx = x.getIndex
-                                  val sort = liftSort(x.getSort).sort
-                                  // deBruijnStack(i) is the i-th indexed variable name.
-                                  assert(deBruijnStack.size > boundVarIdx)
-                                  val varName = deBruijnStack(boundVarIdx)
-                                  (varName, Core.mkVar(varName, sort).box())
-                                } else {
-                                  (s"arg$i", liftTerm(x.asInstanceOf[LoweredTerm]))
-                                }).toList
-                              Core.mkApp(funcArgs, Core.mkVar(funcName.toString, funcSort))
-                            case _ => unexpected(s"error: got ${func}")
-                          }
-
-                        case None => unexpected(s"Error: applying a non-function: ${}")
+                      if domainSorts.isEmpty then {
+                        val name = decl.getName.toString
+                        funcMap.update(name, decl)
+                        Core.mkVar(name, rangeSort)
+                      } else {
+                        val funcName = expr.getFuncDecl.getName
+                        val funcSort = Core.funSort(expr.getFuncDecl.getDomain.toList.map(liftSort), liftSort(expr.getFuncDecl.getRange).sort)
+                        val func = interpEnv(funcName.toString).getOrElse(unexpected(s"Error: applying function not-found ${funcName.toString}"))
+                        funcSort.unify(func.sort) match {
+                          case Some(_) =>
+                            func.e match {
+                              case mac@Core.Macro(name, vars, bodyExpr) =>
+                                val varsEnv = vars.toArray
+                                val funcArgs = expr.getArgs.zipWithIndex.map((x, i) =>
+                                  if x.isVar then {
+                                    val boundVarIdx = x.getIndex
+                                    val sort = liftSort(x.getSort).sort
+                                    // deBruijnStack(i) is the i-th indexed variable name.
+                                    assert(deBruijnStack.size > boundVarIdx)
+                                    val varName = deBruijnStack(boundVarIdx)
+                                    (varName, Core.mkVar(varName, sort).box())
+                                  } else {
+                                    (varsEnv(i)._1, liftTerm(x.asInstanceOf[LoweredTerm]))
+                                  }).toList
+                                Core.mkApp(funcArgs, mac)
+                              case v@Core.Var(name, _) =>
+                                val funcArgs = expr.getArgs.zipWithIndex.map((x, i) =>
+                                  if x.isVar then {
+                                    val boundVarIdx = x.getIndex
+                                    val sort = liftSort(x.getSort).sort
+                                    // deBruijnStack(i) is the i-th indexed variable name.
+                                    assert(deBruijnStack.size > boundVarIdx)
+                                    val varName = deBruijnStack(boundVarIdx)
+                                    (varName, Core.mkVar(varName, sort).box())
+                                  } else {
+                                    (s"arg$i", liftTerm(x.asInstanceOf[LoweredTerm]))
+                                  }).toList
+                                Core.mkApp(funcArgs, Core.mkVar(funcName.toString, funcSort))
+                              case _ => unexpected(s"error: got ${func}")
+                            }
+                          case None => unexpected(s"Error: applying a non-function: ${}")
+                        }
                       }
                   }
                 case _ =>
@@ -910,13 +917,7 @@ object Z3Solver {
               }
             }
 
-            if domainSorts.isEmpty then {
-                val name = decl.getName.toString
-                funcMap.update(name, decl)
-                Core.mkVar(name, rangeSort)
-            } else {
-              decodeDeclByKind()
-            }
+            decodeDeclByKind()
           }
       }
     }
@@ -1385,7 +1386,7 @@ object Z3Solver {
           val funcInterp = model.getFuncInterp(funcDecl)
           funcInterpToAxiom(funcDecl.asInstanceOf[FuncDecl[z3.Sort]], funcInterp.asInstanceOf[FuncInterp[z3.Sort]])
         )
-        
+
       solver.getContext.mkAnd((equalities :: funcAxioms).toArray *).asInstanceOf[solver.LoweredTerm]
     }
 

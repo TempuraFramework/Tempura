@@ -4,10 +4,12 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.helpers.Utils.*
 import org.abstractpredicates.expression.Syntax.*
-import org.abstractpredicates.parsing.io.TransitionSystemReader
+import org.abstractpredicates.parsing.io.{TDLReader, VMTReader}
 import org.abstractpredicates.smt.SmtSolver.*
 import org.abstractpredicates.smt.Z3Solver
 import org.abstractpredicates.transitions.TransitionFormula.{Peeled, Peeler}
+
+import java.nio.file.Paths
 
 class TransitionTest extends AnyFunSuite {
 
@@ -97,14 +99,13 @@ class TransitionTest extends AnyFunSuite {
   }
 
   test("VMT file test for peeler") {
-    val reader = TransitionSystemReader("examples/ranking_infer1.vmt")
-    reader.readVMT match {
+    VMTReader("examples/ranking_infer1.vmt")  match {
       case Right(pts) =>
         println("successfully read VMT input: " + pts.toString)
         assert(true)
         val (te, ie) = (pts.getTypeEnv, pts.getInterpEnv)
         val solver = Z3Solver.Z3Solver(te, ie)
-        val transition = pts.getTrans.get
+        val transition = pts.getTransition
         val normalizedTr = Peeler(solver.box)(transition).normalize
         println(s"Transition formula \n ${transition} \n -----\n")
         println(s"Normalized transition formula \n ${normalizedTr} \n -----\n")
