@@ -17,6 +17,7 @@ A `.tdl` file consists of the following S-expression blocks:
 (vmtlib (<vmtlib expression>)
 (sort <sortname>) 
 (finite-sort <sortname> <size>)
+(var <name> <sort>)
 (state-var <name> <sort> :next <next state name>)
 (transition-var <name> <sort>)
 (init <initial condition>)
