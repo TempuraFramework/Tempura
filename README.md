@@ -18,6 +18,9 @@ A `.tdl` file consists of the following S-expression blocks:
 (sort <sortname>) 
 (finite-sort <sortname> <size>)
 (var <name> <sort>)
+(var <name <sort> <def>)
+(fun <name> <sort>)
+(fun <name <sort> <def>)
 (state-var <name> <sort> :next <next state name>)
 (transition-var <name> <sort>)
 (init <initial condition>)
@@ -37,6 +40,10 @@ A `.tdl` file consists of the following S-expression blocks:
 (fair-assumption <fairness assumption formula> :name <name>)
 ```
 An example of VMT <-> TDL correspondence may be found in the `examples/` folder.
+
+### Formula and Sort Definition Syntax
+
+Formulas are assumed to be written in SMTLIB syntax. Sort definitions are also mostly SMTLIB compliant except function sorts can be defined via the syntax `(-> dom1 dom2 ... domn range)`, but function symbols _must_ be defined using the `fun` keyword instead of the `var` keyword. Every variable or function definition induces a background axiom in the underlying solver, and hence, this is no different than first declaring a theory symbol and then writing a theory axiom for it suing the `(var <name> <sort>)` and `(theory-axiom ...)` syntax.
 
 ### System Model
 
