@@ -15,9 +15,10 @@ Tempura takes in either a transition-system description in VMT format or the fol
 A `.tdl` file consists of the following S-expression blocks:
 ```
 (vmtlib (<vmtlib expression>)
-(declare-sort <sortname>) | (declare-sort <sortname> :projectable)
-(declare-finite-sort <sortname> <size>)
+(sort <sortname>) 
+(finite-sort <sortname> <size>)
 (state-var <name> <sort> :next <next state name>)
+(transition-var <name> <sort>)
 (init <initial condition>)
 (transition <transition>)
 (transition <transition> :name <name>) ;; multiple transitions are allowed, they are taken to be a big disjunction
@@ -35,6 +36,23 @@ A `.tdl` file consists of the following S-expression blocks:
 (fair-assumption <fairness assumption formula> :name <name>)
 ```
 An example of VMT <-> TDL correspondence may be found in the `examples/` folder.
+
+### System Model
+
+In TDL a transition system is a tuple $(\Sigma, X_S, X_{Tr}, X_{Th}, Th, Init, Tr)$ where $\Sigma$ is a set of sorts, either of a finite universe size (specified using `finite` block) or uninterpreted (specified using the `sort`) block. Altogether $X_S \cup X_{Tr} \cup X_{Th}$ is the vocabulary. $X_S$ is a set of _state variables_ which have primed copies in the transition. $X_{Tr}$ is a set of _transition variables_ that don't have primed copies, and only appear as existentially quantified symbols in the transition formula. $X_{Th}$ is a set of _theory symbols_ that appear in the theory axioms but is otherwise immutable during the execution of the transition system. $Th$ is a set of first-order formulas over $X_{Th}$ that axiomatizes the background theory --- for instance, we can introduce a linear order symbol $\succ : \sigma \times \sigma \to \mathbb{B}$ for a particular sort $\sigma \in \Sigma$ by appropriately axiomatizing the symbol $\succ \in X_{Th}$. $Init(X_S)$ is an initial condition describing how the transition system is initialized, and $Tr(X_S, X_{Tr}, X_S')$ is the transition formula that describes transition from a state described by $X_S$ into a state described by $X_S'$, with variables in $X_{Tr}$ being implicitly existentially quantified. A _run_ in the transition system is a sequence of states $s_0,...,s_n$, where each state is over $X_S$ and $s_0 \vDash Init$ and $\forall 0\leq i < n. s_i \wedge \exists X_{Tr}. Tr \vDash s_{i+1}')$.
+
+Variables in $X_S$ and $X_{Tr}$ are specified by the user using either the `(state-var ...)` or the `(transition-var ...)` blocks, correspondingly. Variables in $X_Th$ are implicitly determined by our tool; essentially any free variable in the `(theory-axiom ...)` definitions are taken as an element of $X_{Th}$. We require that $X_S$, $X_{Tr}$, and $X_{Th}$ are disjoint sets.
+
+### Safety properties in TDL
+Each safety property is specified using a `(property ...)` block. Blocks under the same name are taken conjunctively as a single property, and blocks of different names are taken as different safety proof goals (similar to Ivy) that can then be verified using assume-guarantee reasoning. The model checker must then guarantee that, for proof goals $\phi_1,...,\phi_n$, $\forall i. \forall j. \{\phi_j;j\neq i\}\vDash \square \phi$ holds for the given transition system.
+
+### Liveness properties in TDL
+
+The S-expression blocks in TDL `live-property`, `live-assumption`, `fair-assumption` correspond to stating, as a proof goal, a liveness property of form $GF (r) \to G(p \to F q))$ where $G$ and $F$ are LTL globally and eventually operators. The $r$ term here corresponds to a fairness assumption that is toggled infinitely often, `p` is a liveness assumption that describes the pending states of the system, and $q$ is the eventuality that we must reach. Each (fair-assumption, live-assumption, live-property) triple under the same name are grouped together to form the final liveness proof goal, and in case there are multiple unnamed blocks of the same name, they are taken conjunctively to form a single property.
+
+It is possible that a liveness property is specified without a corresponding liveness assumption, or a corresponding fairness assumption, or both. This corresponds to different forms of the general liveness formula described above: If the property doesn't have a liveness assumption then we're verifying $GF(r) \to GF(q)$; if the property doesn't have a fairness assumption then we're verifying $G(p \to F(q))$, or if the property lacks any assumptions we are just checking termination: $GF(q)$. 
+
+On the model checker side, and different from safety properties, we are not going to support assume-guarantee reasoning involving multiple liveness properties yet. This might change in the future. 
 
 ### More details
 Forthcoming
