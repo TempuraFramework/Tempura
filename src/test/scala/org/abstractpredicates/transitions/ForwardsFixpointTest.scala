@@ -43,6 +43,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0",trans)),
       properties = List(),
@@ -100,6 +101,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar0, timedVar1),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0",trans)),
       properties = List(),
@@ -156,6 +158,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar0, timedVar1),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0",trans)),
       properties = List(),
@@ -352,6 +355,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0",trans)),
       properties = List(),
@@ -390,6 +394,7 @@ class ForwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0", trans)),
       properties = List(),

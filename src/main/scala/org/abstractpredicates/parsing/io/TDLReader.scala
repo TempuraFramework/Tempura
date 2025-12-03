@@ -2,7 +2,7 @@ package org.abstractpredicates.parsing.io
 
 import scala.io.Source
 import org.abstractpredicates.parsing.sexpr.{ParseTree, StringToSExprParser, TDLParser, VMTParser}
-import org.abstractpredicates.transitions.{PreTransitionSystem, TransitionSystem}
+import org.abstractpredicates.transitions.{TransitionSystemBuffer, TransitionSystem}
 import org.abstractpredicates.expression.Core
 
 import scala.util.Using

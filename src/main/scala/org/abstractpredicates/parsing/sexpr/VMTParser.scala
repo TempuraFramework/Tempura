@@ -19,7 +19,7 @@ import org.abstractpredicates.transitions.*
 object VMTParser extends EnvTransform[List[ParseTree], TransitionSystem](using summon[ClassTag[List[ParseTree]]], summon[ClassTag[TransitionSystem]]) {
 
   @tailrec
-  def parse(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(pts: PreTransitionSystem)(t: ParseTree): Either[(String, ParseTree), PreTransitionSystem] = {
+  def parse(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(pts: TransitionSystemBuffer)(t: ParseTree): Either[(String, ParseTree), TransitionSystemBuffer] = {
     val typeEnv = pts.getTypeEnv
     val interpEnv = pts.getInterpEnv
     t match {
@@ -66,6 +66,25 @@ object VMTParser extends EnvTransform[List[ParseTree], TransitionSystem](using s
         parseSort(typeEnv)(retSort).map { r =>
           interpEnv.add(name, Core.BoxedExpr.make(r.sort, Var(name, r.sort)))
           pts
+        }
+      case INode(List(
+      Leaf(ParseValue.PTerm("declare-fun")),
+      INode(
+        List(
+          Leaf(ParseValue.PTerm("!")),
+          Leaf(ParseValue.PTerm(name)),
+          INode(List()),
+          retSort,
+          Leaf(ParseValue.PTerm(":transition-variable"))
+        )
+      )
+      )) =>
+        parseSort(typeEnv)(retSort) match {
+          case Right(r) =>
+            interpEnv.add(name, Core.mkVar(name, r))
+            pts.transitionVars.add((name, r))
+            Right(pts)
+          case Left(reason) => Left(reason)
         }
       case INode(List( // next-state definitions
       Leaf(ParseValue.PTerm("define-fun")),
@@ -307,12 +326,12 @@ object VMTParser extends EnvTransform[List[ParseTree], TransitionSystem](using s
 
 
   override def apply(typeEnv: TypeEnv, interpEnv: InterpEnv)(a: List[ParseTree]): Either[String, TransitionSystem] = {
-    val pts = PreTransitionSystem()
+    val pts = TransitionSystemBuffer()
     pts.setTypeEnv(typeEnv)
     pts.setInterpEnv(interpEnv)
 
     @tailrec
-    def aux(s: List[ParseTree]): Either[String, PreTransitionSystem] =
+    def aux(s: List[ParseTree]): Either[String, TransitionSystemBuffer] =
       s match {
         case a :: t =>
           parse(typeEnv, interpEnv)(pts)(a) match {

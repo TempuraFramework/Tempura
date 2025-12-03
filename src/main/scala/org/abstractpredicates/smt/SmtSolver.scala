@@ -305,7 +305,8 @@ object SmtSolver {
             stop = true
           } else getModel match {
             case Some(m) =>
-              println(s"     allSat: got model ${m.toString}, round ${counter}")
+              //println(s"     allSat: got model ${m.toString}, round ${counter}")
+              println(s"     allSat: got model @ round ${counter}")
               val blockingClause = m.asNegatedTerm(vocab)
               //println(s"=================== blocking condition: ======\n ${blockingClause.toString}\n==================")
               conditions = blockingClause :: conditions

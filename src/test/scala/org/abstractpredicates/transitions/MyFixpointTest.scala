@@ -136,6 +136,7 @@ class MyFixpointTest extends AnyFunSuite {
     val fairness = List(("fair0",Core.mkTrue))
     val ts = TransitionSystem(
       stateVars,
+      Set(),
       init,
       List(("trans0",trans)),
       List(), // assertions for safety properties
@@ -218,6 +219,7 @@ class MyFixpointTest extends AnyFunSuite {
 
     val ts = TransitionSystem(
       stateVars,
+      Set(),
       initCond,
       List(("trans0",transCond)),
       List(), // assertions for safety properties
@@ -313,6 +315,7 @@ class MyFixpointTest extends AnyFunSuite {
 
     val ts = TransitionSystem(
       stateVars,
+      Set(),
       initCond,
       List(("trans0", transCond)),
       List(), // assertions for safety properties

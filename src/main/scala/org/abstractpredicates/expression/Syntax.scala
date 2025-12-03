@@ -65,6 +65,7 @@ object Syntax {
   }
 
   extension (e: InterpEnv) {
+    // Create a new variable
     def newVar[S <: Sort[S]](b: Core.Var[S]): Core.Var[S] = {
       e.add(b.name, b)
       b
@@ -74,6 +75,7 @@ object Syntax {
       e.add(n, p)
       p
     }
+    // Create a new variable and automatically name it
     def freshVar[S <: Sort[S]](sort: S): Core.Var[S] = {
 
       @tailrec
@@ -88,13 +90,13 @@ object Syntax {
       e.add(varName, Core.Var(varName, sort))
       Core.Var(varName, sort)
     }
-
+    // Define a new variable and automatically name it
     def freshVar[S <: Sort[S]](sort: S, expr: Expr[S]): Core.Expr[S] = {
       val p = freshVar(sort)
       e.add(p.name, expr)
       expr
     }
-
+    // Create a new variable with a given name and automatically name it
     def newVarDef(n: String, b: BoxedExpr): Core.BoxedExpr = {
       e.add(n, b)
       b
@@ -104,7 +106,9 @@ object Syntax {
       expr
     }
 
-    infix def |-[X <: Sort[X]](n: String, s: X): Expr[X] = newVar(n, s)
+    infix def |-[X <: Sort[X]](t: (String, X)): Expr[X] = newVar(t._1, t._2)
+
+    infix def ||-[X <: Sort[X]](t: (String, Expr[X])): Expr[X] = newVarDef(t._1, t._2)
   }
 
   extension (tyE: TypeEnv) {

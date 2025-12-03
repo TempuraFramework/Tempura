@@ -11,6 +11,7 @@ import org.abstractpredicates.smt.SmtSolver.Result.UNSAT
 import scala.collection.mutable.ListBuffer
 
 class TransitionSystem(val stateVars: Set[TimedVariable],
+                       val transitionVars: Set[(String, Core.BoxedSort)],
                        val init: Core.Expr[BoolSort], // formula over state variables
                        val trans: List[(String, Core.Expr[Core.BoolSort])], // formula over state variables, next-state variables, and internal (transition) variables.
                        val properties: List[(String, Core.Expr[BoolSort])],

@@ -47,6 +47,7 @@ class BackwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0",trans)),
       properties = List(),
@@ -107,6 +108,7 @@ class BackwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar0, timedVar1),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0", trans)),
       properties = List(),
@@ -152,6 +154,7 @@ class BackwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0",trans)),
       properties = List(),
@@ -211,6 +214,7 @@ class BackwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar0, timedVar1),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0",trans)),
       properties = List(),
@@ -371,6 +375,7 @@ class BackwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0", trans)),
       properties = List(),
@@ -411,6 +416,7 @@ class BackwardsFixpointTest extends AnyFunSuite {
     // No liveness assertions - defaults to true (all states are live)
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0",trans)),
       properties = List(),
@@ -458,6 +464,7 @@ class BackwardsFixpointTest extends AnyFunSuite {
 
     val trs = TransitionSystem(
       stateVars = Set(timedVar),
+      transitionVars = Set(),
       init = init,
       trans = List(("trans0",trans)),
       properties = List(),

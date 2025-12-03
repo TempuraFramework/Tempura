@@ -1,32 +1,116 @@
 package org.abstractpredicates.parsing.sexpr
 
-import org.abstractpredicates.expression.Core.{InterpEnv, TypeEnv}
-import org.abstractpredicates.transitions.{PreTransitionSystem, TimedVariable, TransitionSystem}
+import org.abstractpredicates.expression.Core.{BoxedExpr, InterpEnv, TypeEnv, Var}
+import org.abstractpredicates.transitions.{TransitionSystemBuffer, TimedVariable, TransitionSystem}
 import org.abstractpredicates.parsing.sexpr.ParseTree.*
 import org.abstractpredicates.parsing.sexpr.ParseValue.*
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.expression.Syntax.*
 import org.abstractpredicates.helpers.Transforms.EnvTransform
-
+import org.abstractpredicates.parsing.sexpr.SmtlibParser.{parseFormula, parseSort, parseSortedArgs}
+import cats.implicits.*
+import org.abstractpredicates.helpers.Utils.*
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 
 object TDLParser extends EnvTransform[List[ParseTree], TransitionSystem](using summon[ClassTag[List[ParseTree]]], summon[ClassTag[TransitionSystem]]) {
 
-  def parse(typeEnv: TypeEnv, interpEnv: InterpEnv)(p: PreTransitionSystem, tree: ParseTree): Either[String, PreTransitionSystem] = {
+  def parse(typeEnv: TypeEnv, interpEnv: InterpEnv)(p: TransitionSystemBuffer, tree: ParseTree): Either[String, TransitionSystemBuffer] = {
     tree match {
       case INode(List(Leaf(PTerm("state-var")), Leaf(PTerm(varName)), varSort, Leaf(PTerm(":next")), Leaf(PTerm(nextVarName)))) =>
         SmtlibParser.parseSort(typeEnv)(varSort) match {
           case Right(parsedSort) =>
             interpEnv |- (varName, parsedSort)
+            interpEnv |- (nextVarName, parsedSort)
             val timedVar = TimedVariable(varName, nextVarName, 0, parsedSort)
             p.stateVars.add(timedVar)
             Right(p)
           case Left(reason) => Left(reason.toString)
         }
+      case INode(List(Leaf(PTerm("transition-var")), Leaf(PTerm(varName)), varSort)) =>
+        SmtlibParser.parseSort(typeEnv)(varSort) match {
+          case Right(parsedSort) =>
+            interpEnv |- (varName, parsedSort)
+            p.transitionVars.add((varName, parsedSort))
+            Right(p)
+          case Left(reason) => Left(reason.toString)
+        }
+      case INode(List(Leaf(PTerm("var")), Leaf(PTerm(varName)), varSort)) =>
+        SmtlibParser.parseSort(typeEnv)(varSort) match {
+          case Right(parsedSort) =>
+            interpEnv |- (varName, parsedSort)
+            Right(p)
+          case Left(reason) => Left(reason.toString)
+        }
+      case INode(List(Leaf(PTerm("var")), Leaf(PTerm(varName)), varSort, varDef)) =>
+        SmtlibParser.parseSort(typeEnv)(varSort) match {
+          case Right(parsedSort) =>
+            SmtlibParser.parseFormula(typeEnv, interpEnv)(varDef) match {
+              case Right(parsedDef) =>
+                parsedSort.unifyExpr(parsedDef) match {
+                  case Some(_) =>
+                    interpEnv ||- (varName, parsedDef)
+                    Right(p)
+                  case None  => Left(s"var definition does not agree with var sort; ${parsedSort.toString} does not type-check with ${parsedDef.toString}")
+                }
+              case Left(reason) => Left(reason.toString)
+            }
+          case Left(reason) => Left(reason.toString)
+        }
+      case INode(List(
+      Leaf(ParseValue.PTerm("fun")),
+      Leaf(ParseValue.PTerm(name)),
+      INode(List(
+      Leaf(ParseValue.PTerm("->")),
+      INode(argsSorts),
+      retSort
+      )))) =>
+        (argsSorts.traverse(parseSort(typeEnv)), parseSort(typeEnv)(retSort)).tupled.onSuccess {
+          (argSortsT, retSortT) =>
+            val declareFunSort = Core.funSort(argSortsT, retSortT)
+            val declareFunExpr = BoxedExpr.make(declareFunSort, Var(name, declareFunSort))
+            interpEnv.add(name, declareFunExpr)
+            Right(p)
+        } match {
+          case Right(p) => Right(p)
+          case Left(e) => Left(e.toString)
+        }
+      case INode(List(Leaf(ParseValue.PTerm("fun")),
+      Leaf(ParseValue.PTerm(name)),
+      INode(List(
+      INode(argsSorts),
+      retSort)), body)) =>
+        parseSortedArgs(typeEnv, interpEnv)(argsSorts).onSuccess { translatedSorts =>
+          parseSort(typeEnv)(retSort).onSuccess { translatedRetSort =>
+            parseFormula(typeEnv, interpEnv)(body).onSuccess { bodyT =>
+              val domSortsT = translatedSorts.map(x => x._2)
+              val funSort = Core.FunSort(domSortsT, translatedRetSort.sort)
+              val funExpr = BoxedExpr.make(Core.funSort(domSortsT, bodyT.sort),
+                Core.mkMacro(name, translatedSorts, bodyT.e))
+              interpEnv.add(name, funExpr)
+              Right(p)
+            }
+          }
+        } match {
+          case Right(p) => Right(p)
+          case Left(e) => Left(e.toString)
+        }
+      case INode(List(Leaf(PTerm("sort")), Leaf(PTerm(varName)))) =>
+        typeEnv |- Core.UnInterpretedSort(varName, 0)
+        Right(p)
+      case INode(List(Leaf(PTerm("finite-sort")), Leaf(PTerm(sortName)), Leaf(PNumber(size)))) =>
+        typeEnv |- Core.FiniteUniverseSort(sortName, size)
+        Right(p)
       case INode(List(Leaf(PTerm("vmtlib")), smtlibStmt)) =>
         VMTParser.parse(typeEnv, interpEnv)(p)(smtlibStmt) match {
           case Right(_) => Right(p)
+          case Left(error) => Left(error.toString)
+        }
+      case INode(List(Leaf(PTerm("parameter-var")), Leaf(PTerm(varName)), sort)) =>
+        SmtlibParser.parseSort(typeEnv)(sort) match {
+          case Right(s) =>
+            interpEnv |- (varName, s)
+            Right(p)
           case Left(error) => Left(error.toString)
         }
       case INode(List(Leaf(PTerm("init")), initCond)) =>
@@ -46,14 +130,14 @@ object TDLParser extends EnvTransform[List[ParseTree], TransitionSystem](using s
           case Right(BoolExpr(fmla)) =>
             p.transitions.add(fmla)
             Right(p)
-          case _ => Left(s"malformed transition formula definition: ${tree}")
+          case e => Left(s"malformed transition formula condition ($e) for: ${transitionCond}")
         }
       case INode(List(Leaf(PTerm("transition")), transitionCond, Leaf(PTerm(":name")), Leaf(PTerm(name)))) =>
         SmtlibParser(typeEnv, interpEnv)(transitionCond) match {
           case Right(BoolExpr(fmla)) =>
             p.transitions.addNamed((fmla, name))
             Right(p)
-          case _ => Left(s"malformed transition formula definition: ${tree}")
+          case e => Left(s"malformed transition formula definition ($e) for: ${tree}")
 
         }
       case INode(List(Leaf(PTerm("theory-axiom")), ax)) =>
@@ -126,17 +210,31 @@ object TDLParser extends EnvTransform[List[ParseTree], TransitionSystem](using s
             Right(p)
           case _ => Left(s"malformed liveness property definition: ${tree}")
         }
+      case INode(List(Leaf(PTerm("live-assumption")), assumed)) =>
+        SmtlibParser(typeEnv, interpEnv)(assumed) match {
+          case Right(BoolExpr(fmla)) =>
+            p.liveAssumptions.add(fmla)
+            Right(p)
+          case _ => Left(s"malformed liveness property definition: ${tree}")
+        }
+      case INode(List(Leaf(PTerm("live-assumption")), assumed, Leaf(PTerm(":name")), Leaf(PTerm(name)))) =>
+        SmtlibParser(typeEnv, interpEnv)(assumed) match {
+          case Right(BoolExpr(fmla)) =>
+            p.liveAssumptions.addNamed((fmla, name))
+            Right(p)
+          case _ => Left(s"malformed liveness property definition: ${tree}")
+        }
       case _ =>
         Left(s"TDLParser: unexpected input ${tree.toString}")
     }
   }
 
   override def apply(typeEnv: TypeEnv, interpEnv: InterpEnv)(a: List[ParseTree]): Either[String, TransitionSystem] = {
-    val pts = PreTransitionSystem()
+    val pts = TransitionSystemBuffer()
     pts.setTypeEnv(typeEnv)
     pts.setInterpEnv(interpEnv)
 
-    @tailrec def aux(l: List[ParseTree]): Either[String, PreTransitionSystem] = {
+    @tailrec def aux(l: List[ParseTree]): Either[String, TransitionSystemBuffer] = {
       l match {
         case a :: t =>
           parse(typeEnv, interpEnv)(pts, a) match {

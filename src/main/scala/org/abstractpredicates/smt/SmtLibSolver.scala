@@ -240,7 +240,8 @@ object SmtLibSolver {
       // Ternary operator (ite)
       case Core.Top("ite", cond, thn, els, _) =>
         s"(ite ${lower(bound)(cond)} ${lower(bound)(thn)} ${lower(bound)(els)})"
-
+      case Core.Top("=>", cond, thn, els, _) =>
+        s"(=> ${lower(bound)(cond)} ${lower(bound)(thn)} ${lower(bound)(els)})"
       // Array operations
       case Core.ArraySelect(arr, idx) =>
         s"(select ${lower(bound)(arr)} ${lower(bound)(idx)})"

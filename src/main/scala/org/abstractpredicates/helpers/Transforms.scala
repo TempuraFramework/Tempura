@@ -44,6 +44,14 @@ object Transforms {
 
   }
 
+  trait WithTransform[T, A, B](val tTag: ClassTag[T], val aTag: ClassTag[A], val bTag: ClassTag[B]) extends TempuraTransform {
+    self: Singleton =>
+    
+    def getName: String = self.getClass.getName
+    
+    def apply[TT](t: TT)(a: A): Either[String, B]
+  }
+  
   trait BoxedBasicTransform extends BoxedTempuraTransform {
     type A
     type B
@@ -68,6 +76,14 @@ object Transforms {
     override def getName: String = transform.getName
   }
 
+  trait BoxedaWithTransform extends BoxedTempuraTransform {
+    type T
+    type A
+    type B
+    val transform: WithTransform[T, A, B]
+    override def getName: String = transform.getName
+  }
+  
   extension [S, T](trans: BasicTransform[S, T]) {
     def box: BoxedBasicTransform {type A = S; type B = T} =
       new BoxedBasicTransform {
@@ -97,6 +113,16 @@ object Transforms {
       }
   }
 
+  extension [W, X, Y](trans: WithTransform[W, X, Y]) {
+    def box: BoxedaWithTransform {type T = W; type A = X;type B = Y} =
+      new BoxedaWithTransform {
+        override type T = W
+        override type A = X
+        override type B = Y
+        override val transform: WithTransform[T, A, B] = trans
+      }
+  }
+  
   /**
    * TODO: There's as bit of a code smell here, where class tags are associated with the uncontainerized / unboxed
    * trait instead of the containerized trait. This causes a fair bit of code duplication when we code up the 

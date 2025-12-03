@@ -2,7 +2,7 @@ package org.abstractpredicates.parsing
 
 import org.abstractpredicates.expression.Core
 import org.abstractpredicates.parsing.sexpr.{ParseTree, StringToSExprParser, VMTParser}
-import org.abstractpredicates.transitions.PreTransitionSystem
+import org.abstractpredicates.transitions.TransitionSystemBuffer
 import org.scalatest.funsuite.AnyFunSuite
 import org.abstractpredicates.helpers.Utils.*
 class VMTParserTests extends AnyFunSuite {
@@ -12,7 +12,7 @@ class VMTParserTests extends AnyFunSuite {
   }
 
   test("parse declare-fun expression with empty domain ")  {
-    val pts = PreTransitionSystem()
+    val pts = TransitionSystemBuffer()
     val s = "(declare-fun x () Int)"
     sexprs(s) foreach {
       x =>
@@ -28,7 +28,7 @@ class VMTParserTests extends AnyFunSuite {
   }
 
   test("parse declare-fun expression with type Bool->Bool->Int ") {
-    val pts = PreTransitionSystem()
+    val pts = TransitionSystemBuffer()
     val s = "(declare-fun x (Bool Bool) Int)"
     sexprs(s) foreach {
       x =>
@@ -46,7 +46,7 @@ class VMTParserTests extends AnyFunSuite {
   }
 
   test("parse declare-fun expression with type (Array Bool Int)->Bool->Int ") {
-    val pts = PreTransitionSystem()
+    val pts = TransitionSystemBuffer()
     val s = "(declare-fun x ((Array Bool Int) Bool) Int)"
     sexprs(s) foreach {
       x =>
@@ -65,7 +65,7 @@ class VMTParserTests extends AnyFunSuite {
 
 
   test("parse init condition") {
-    val pts = PreTransitionSystem()
+    val pts = TransitionSystemBuffer()
     val init = "(define-fun init () Bool (! true :init true))"
     sexprs(init) foreach {
       x =>
