@@ -16,7 +16,7 @@ object main {
       "))"
 
   @main def start() : Unit = {
-    val a = ""
+    val a = " "
     val args = a.split(" ") ++ List("-e", CMD)// "(tempura.cozy.CS/convert '(+ 1 2 3))")
     println(" ------------------------------------------- ")
     println(" -----------  Starting Cozy REPL  ---------- ")
