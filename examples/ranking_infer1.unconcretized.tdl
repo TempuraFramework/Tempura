@@ -1,4 +1,4 @@
-(finite-sort time 4)
+(sort time)
 
 (parameter-var _X time)
 (fun |<:time:time| (-> (time time) Bool))

@@ -1,4 +1,4 @@
-(finite-sort time 4)
+(sort time)
 
 (parameter-var _X time)
 (fun |<:time:time| (-> (time time) Bool))
@@ -7,6 +7,7 @@
 (transition-var |__ts0__new_fml:val| time)
 (transition-var |__loc:y| time)
 (transition-var |__fml:x| time)
+(transition-var __m_.r_a Bool)
 (transition-var __ts0_b Bool)
 (transition-var __ts0__m_q1.receiving.now Bool)
 (transition-var __ts0_a Bool)
@@ -15,6 +16,7 @@
 (transition-var __m_.r Bool)
 (transition-var |__new_fml:val| time)
 
+(state-var q1.trying.now Bool :next new_q1.trying.now)
 (state-var q1.pending (Array time Bool) :next new_q1.pending)
 (state-var .r Bool :next new_.r)
 (state-var q1.sending.now Bool :next new_q1.sending.now)
@@ -26,24 +28,27 @@
   (and (not .r)
        (= q1.pending ((as const (Array time Bool)) false))
        (not q1.sending.now)
+       (not q1.trying.now)
        (not q1.receiving.now)))
 
 (transition 
   (and (not new_.r)
+             (= q1.trying.now new_q1.trying.now)
              (= q1.pending new_q1.pending)
              (= q1.receiving.value new_q1.receiving.value)
-             (not new_q1.receiving.now)
+             (= q1.receiving.now new_q1.receiving.now)
              (= q1.sending.value new_q1.sending.value)
-             (not new_q1.sending.now)) 
-  :name _idle)
+             (= q1.sending.now new_q1.sending.now)) :name _idle)
 
 (transition
-  (let ((a!1 (forall ((|V0:time| time))
+        (let ((a!1 (forall ((|V0:time| time))
                      (or (not __ts0_b)
                          (not (select q1.pending |V0:time|))))))
-          (and __m_q1.trying.now
-               (= __m_.r __m_q1.trying.now)
-               (= new_.r __m_.r)
+          (and (not __m_.r_a)
+               __m_q1.trying.now
+               (= __m_.r (or __m_.r_a __m_q1.trying.now))
+               (not new_q1.trying.now)
+               (= new_.r (or __m_.r new_q1.trying.now))
                (= new_q1.pending
                   (ite __ts0_b q1.pending
                        (store q1.pending |__loc:y| false)))
@@ -52,9 +57,9 @@
                   (ite __ts0_b q1.receiving.value
                        |__ts0__new_fml:val|))
                __ts0__m_q1.receiving.now
-               (= new_q1.receiving.now (and __ts0_a __ts0__m_q1.receiving.now))
+               (= new_q1.receiving.now (and __ts0_b q1.receiving.now))
                (= q1.sending.value new_q1.sending.value)
-               (not new_q1.sending.now)
+               (= q1.sending.now new_q1.sending.now)
                (or __ts0_a __ts0_b)
                (or (not __ts0_a) (select q1.pending |__loc:y|))
                (forall ((|V0:time| time))
@@ -63,10 +68,9 @@
                                           (|<:time:time| |V0:time| |__loc:y|))
                                       (not (= |V0:time| |__loc:y|))))))
                    (or (not __ts0_a) a!1)))
-               a!1)) 
-    :name q1.recv)
+               a!1)) :name q1.recv)
 (transition
-  (let ((a!1 (forall ((|T:time| time))
+        (let ((a!1 (forall ((|T:time| time))
                      (or (not (select q1.pending |T:time|))
                          (|<:time:time| |T:time| |__fml:x|)))))
           (and (not new_.r)
@@ -74,11 +78,11 @@
                (= |__new_fml:val| |__fml:x|)
                (= new_q1.sending.value |__new_fml:val|)
                __m_q1.sending.now
-               (= new_q1.sending.now __m_q1.sending.now)
+               (not new_q1.sending.now)
+               (= q1.trying.now new_q1.trying.now)
                (= q1.receiving.value new_q1.receiving.value)
-               (not new_q1.receiving.now)
-               a!1)) 
-  :name q1.send)
+               (= q1.receiving.now new_q1.receiving.now)
+               a!1)) :name q1.send)
 
 (theory-axiom
   (forall ((|T:time| time) (|U:time| time) (|V:time| time))
@@ -111,5 +115,6 @@
  (and q1.sending.now (= q1.sending.value _X)) :name live0)
 
 (fair-assumption
-  .r
+  q1.trying.now
   :name live0)
+
