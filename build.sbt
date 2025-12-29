@@ -1,6 +1,6 @@
 ThisBuild / version := "0.1.0"
 
-ThisBuild / scalaVersion := "3.7.3"
+ThisBuild / scalaVersion := "3.7.4"
 
 libraryDependencies ++= Seq(
   "org.scalacheck" %% "scalacheck" % "1.15.4" % "test",
@@ -17,6 +17,7 @@ libraryDependencies ++= Seq(
   "org.typelevel" %% "shapeless3-typeable" % "3.4.0",
   "com.lihaoyi" % "ammonite_3.6.3" % "3.0.2", //% "test" cross CrossVersion.full,
   "de.uni-freiburg.informatik.ultimate" % "smtinterpol" % "2.5-1388-ga5a4ab0c", // SMTInterpol
+  "org.clojure" % "clojure" % "1.12.4", // Clojure for mini-DSL
   //"tools.aqua" % "z3-turnkey" % "4.14.1" ,// Z3-Turnkey: https://github.com/tudo-aqua/z3-turnkey
   "tools.aqua" % "cvc5-turnkey" % "1.2.0", // CVC5-Turnkey: https://github.com/tudo-aqua/cvc5-turnkey
   "org.scala-lang" %% "scala3-staging" % scalaVersion.value // for staged evaluation support
@@ -71,7 +72,7 @@ ThisBuild / envVars ++= Map(
     sys.env.get("PATH").fold(p)(old => s"$p${java.io.File.pathSeparator}$old")
   }
 )
-//Compile / run / 
+//Compile / run /
 ThisBuild / javaOptions ++= Seq(
   s"-Djava.library.path=${(baseDirectory.value / "lib" / platform).getAbsolutePath}"
 )

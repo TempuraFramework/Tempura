@@ -1,0 +1,82 @@
+package tempura.parsing
+
+import org.scalatest.funsuite.AnyFunSuite
+import tempura.helpers.Utils.*
+import tempura.expression.Core
+import tempura.parsing.sexpr.{ParseTree, StringToSExprParser, VMTParser}
+import tempura.transitions.TransitionSystemBuffer
+
+class VMTParserTests extends AnyFunSuite {
+
+  private def sexprs(s: String) : List[ParseTree] = {
+    StringToSExprParser(Tuple1(s)).map(_._1).getOrElse(failwith(s"error: couldn't parse expression: ${s}"))
+  }
+
+  test("parse declare-fun expression with empty domain ")  {
+    val pts = TransitionSystemBuffer()
+    val s = "(declare-fun x () Int)"
+    sexprs(s) foreach {
+      x =>
+        println(s"parsing ${x}: ")
+        VMTParser.parse(Core.emptyTypeEnv, Core.emptyInterpEnv)(pts)(x) match {
+          case Right(answer) => println(answer);
+            val xFun = answer.getInterpEnv("x").get
+            print(s"x = ${xFun}")
+            assert(xFun.e == Core.Var("x", Core.NumericSort()))
+          case Left(reason) => println(reason); assert(false)
+        }
+    }
+  }
+
+  test("parse declare-fun expression with type Bool->Bool->Int ") {
+    val pts = TransitionSystemBuffer()
+    val s = "(declare-fun x (Bool Bool) Int)"
+    sexprs(s) foreach {
+      x =>
+        println(s"parsing ${x}: ")
+        VMTParser.parse(Core.emptyTypeEnv, Core.emptyInterpEnv)(pts)(x) match {
+          case Right(answer) =>
+            println(answer)
+            val xFun = answer.getInterpEnv("x").get
+            print(s"x = ${xFun.toString}")
+            assert(xFun.e == Core.Var("x", Core.funSort(List(Core.BoolSort(), Core.BoolSort()),Core.NumericSort() )))
+            assert(true)
+          case Left(reason) => println(reason); assert(false)
+        }
+    }
+  }
+
+  test("parse declare-fun expression with type (Array Bool Int)->Bool->Int ") {
+    val pts = TransitionSystemBuffer()
+    val s = "(declare-fun x ((Array Bool Int) Bool) Int)"
+    sexprs(s) foreach {
+      x =>
+        println(s"parsing ${x}: ")
+        VMTParser.parse(Core.emptyTypeEnv, Core.emptyInterpEnv)(pts)(x) match {
+          case Right(answer) => println(answer)
+            val xFun = answer.getInterpEnv("x").get
+            print(s"x = ${xFun.toString}")
+            assert(xFun.e == Core.Var("x", Core.funSort(List(Core.ArraySort(Core.BoolSort(), 
+              Core.NumericSort()), Core.BoolSort()),Core.NumericSort() )))
+            assert(true)
+          case Left(reason) => println(reason); assert(false)
+        }
+    }
+  }
+
+
+  test("parse init condition") {
+    val pts = TransitionSystemBuffer()
+    val init = "(define-fun init () Bool (! true :init true))"
+    sexprs(init) foreach {
+      x =>
+        println(s"parsing ${x}: ")
+        VMTParser.parse(Core.emptyTypeEnv, Core.emptyInterpEnv)(pts)(x) match {
+          case Right(answer) => println(answer)
+            assert(true)
+          case Left(reason) => println(reason); assert(false)
+        }
+    }
+  }
+
+}
