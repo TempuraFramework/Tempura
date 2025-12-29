@@ -15,7 +15,8 @@ object main {
       ":eval (fn [expr] (tempura.cozy.CS/eval expr))\n  " +
       "))"
 
-  @main def start(a: String) : Unit = {
+  @main def start() : Unit = {
+    val a = ""
     val args = a.split(" ") ++ List("-e", CMD)// "(tempura.cozy.CS/convert '(+ 1 2 3))")
     println(" ------------------------------------------- ")
     println(" -----------  Starting Cozy REPL  ---------- ")
