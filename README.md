@@ -62,6 +62,136 @@ It is possible that a liveness property is specified without a corresponding liv
 
 On the model checker side, and different from safety properties, we are not going to support assume-guarantee reasoning involving multiple liveness properties yet. This might change in the future. 
 
+### The Cozy User Interface
+
+The REPL feature of Tempura implements a DSL called Cozy, which is embedded inside Clojure. The following is an incomplete list of functions one can call inside the REPL in Clojure fashion. The functions allow the REPL user to manipulate Tempura's library routines in a Clojure-esque way, and are organized into three namespaces:
+ - the `c` namespace, which contains some generic formula and sort manipulation routines
+ - the `c.solver` namespace, which bridges Tempura's SMT solver interface with Cozy
+ - the `c.solverOps` namespace, which consists of a set of routines to compile a Tempura IR formula to a SMT solver's own representation (called "lowering") and back (called "lifting")
+ - the `c.transforms` namespace, which plugs into all transformations one can do on objects inside Tempura
+
+#### The `c` Namespace 
+***Creating sorts***
+ ```
+  (c/sort 'SortName)                    ; Create uninterpreted sort
+  (c/finite-sort 'SortName size)        ; Create finite universe sort (size: integer)
+```
+***Creating variables and definitions***
+```
+  (c/var 'varName 'SortExpr)            ; Declare uninterpreted variable
+  (c/var 'varName '(Array Int Bool))    ; Example: array variable
+  (c/def 'varName expr)                 ; Define interpreted variable with expression
+```
+***Creating expressions***
+```
+  (c/expr '(and x y))                   ; Parse S-expression to Core.BoxedExpr
+  (c/expr '(forall ((x Int)) (> x 0)))  ; Quantified formula
+```
+
+#### The `c.solver` Namespace
+***Creating solvers***
+```
+  (c.solver/create 'z3 :nickname)       ; Create Z3 solver (keyword for name)
+  (c.solver/create 'cvc5 :s1)           ; Create CVC5 solver
+  (c.solver/create 'smtinterpol :si)    ; Create SMTInterpol solver
+```
+***Environments***
+ 
+ All variables that have a corresponding representation inside the solver are stored in an `interp-env`. All sort definitions are stored in a `type-env`. There is a unique `interp-env` and `type-env` associated with each Clojure namespace.
+ ```
+  (c.solver/interp-env)                 ; Get context of all variables from current namespace
+  (c.solver/type-env)                   ; Get context of all sorts from current namespace
+ ```
+***Solver operations***
+
+ The following is a list of solver operations generic to any SMT solver Tempura supports.
+ ```
+  (c.solver/push solver)                ; Push solver context
+  (c.solver/pop solver)                 ; Pop solver context
+  (c.solver/reset solver)               ; Reset solver state
+  (c.solver/add-constraint solver expr) ; Add single constraint (BoxedExpr)
+  (c.solver/add-constraints solver '(expr1 expr2 ...)) ; Add list of constraints
+
+  (c.solver/check-sat solver)           ; Returns :sat, :unsat, or :unknown
+  (c-solver-solve-once solver expr)     ; Check sat with push/pop (user namespace)
+
+
+  (c.solver/model solver)               ; Get model if SAT (returns Model or nil)
+  (c.solver/unsat-core solver)          ; Get unsat core if UNSAT (returns UnsatCore or nil)
+
+
+  (c.solver/fork solver)                ; Create independent copy of solver
+  (c.solver/history solver)             ; Get command history as list
+  (c.solver/init solver :lia)           ; Initialize logic (:lia, :nia, or :arith-free)
+```
+
+#### The `c.solverOps` Namespace
+
+This namespace contains a set of routines for solver oprations including lowering (compiling from an expression in Tempura IR to an expression in the backend SMT solver's format) and lifting (compiling from an expression in backend SMT solver's format back to Tempura IR).
+
+```
+  (c.solverOps/lower solver expr)       ; Lower Core expr to solver term
+  (c.solverOps/lift solver term)        ; Lift solver term to Core expr
+  (c.solverOps/lift-sort solver sort)   ; Lift solver sort to Core sort
+  (c.solverOps/lift-def solver func)    ; Lift solver func decl to Core expr
+
+  (c.solverOps/declare-var solver "varName" sort)    ; Declare uninterpreted var
+  (c.solverOps/define-var solver "varName" expr)     ; Define var, returns [decl axioms]
+  (c.solverOps/define-sort solver sort)              ; Define sort in solver
+  (c.solverOps/lower-sort solver sort)               ; Lower sort to solver sort
+```
+  
+#### Namespace: c.transforms (Dynamic Transforms)
+
+  All registered transforms from Registry are available as variadic functions:
+  (c.transforms/transform-name arg1 arg2 ...)  ; Call registered transform
+
+
+### Some Cozy Usage Examples
+
+***Formula and sort manipulation***
+```
+  (c/sort 'Node)
+  (c/finite-sort 'Color 3)
+  (c/var 'x 'Int)
+  (c/var 'nodes '(Array Int Node))
+```
+
+***Creating and using a solver***
+```
+  (def s (c.solver/create 'z3 :my-solver))
+  (c.solver/init s :lia)
+
+  ;; Add constraints
+  (def constraint (c/expr '(> x 0)))
+  (c.solver/add-constraint s constraint)
+  (c.solver/push s)
+  (c.solver/add-constraint s (c/expr '(< x 10)))
+
+  ;; Check satisfiability
+  (c.solver/check-sat s)  ; => :sat
+
+  ;; Get model
+  (def m (c.solver/model s))
+
+  ;; Clean up
+  (c.solver/pop s)
+```
+
+### Cozy Syntax
+Cozy syntax is just Clojure syntax:
+
+  | Argument Type      | Syntax   | Example                 |
+  |--------------------|----------|-------------------------|
+  | Sort/Variable name | 'name    | 'Int, 'myVar            |
+  | Solver backend     | 'name    | 'z3, 'cvc5              |
+  | Solver nickname    | :keyword | :s1, :my-solver         |
+  | Logic type         | :keyword | :lia, :nia, :arith-free |
+  | Result value       | :keyword | :sat, :unsat, :unknown  |
+  | String literal     | "string" | "varName"               |
+
+
+
 ### More details
 Forthcoming
 

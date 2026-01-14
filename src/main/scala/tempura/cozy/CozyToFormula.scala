@@ -9,16 +9,16 @@ import cats.implicits.*
 import tempura.cozy.CS.*
 
 
-trait CozyToExpr
+trait CozyToFormula
 
-object CozyToExpr {
+object CozyToFormula {
   // Cozy sort -> sort
-  @static def cozyParseSort(e: CExpr): Either[String, Core.BoxedSort] = {
+  def cozyParseSort(e: CozyExpr): Either[String, Core.BoxedSort] = {
     cozyParseSort(currentNS.getTypeEnv)(e)
   }
 
-  private def cozyParseSort(typeEnv: Core.TypeEnv)(e: CExpr): Either[String, Core.BoxedSort] = {
-    import CExpr.*
+  private def cozyParseSort(typeEnv: Core.TypeEnv)(e: CozyExpr): Either[String, Core.BoxedSort] = {
+    import CozyExpr.*
     e match {
       case CSeq(Vector(CSymbol("Array", _), arrDomExpr, arrRangeExpr)) =>
 
@@ -75,11 +75,11 @@ object CozyToExpr {
     }
   }
 
-  @static def cozyParseExpr(e: CExpr): Either[String, Core.BoxedExpr] = {
+  def cozyParseExpr(e: CozyExpr): Either[String, Core.BoxedExpr] = {
     cozyParseExpr(currentNS.getTypeEnv, currentNS.getInterpEnv)(e)
   }
 
-  @static def cozyParseExpr[S <: Core.Sort[S]](e: CExpr, sort: S): Either[String, Core.Expr[S]] = {
+  def cozyParseExpr[S <: Core.Sort[S]](e: CozyExpr, sort: S): Either[String, Core.Expr[S]] = {
     cozyParseExpr(e) flatMap { be =>
       be.unify(sort) match {
         case Some(e) => Right(e)
@@ -88,8 +88,8 @@ object CozyToExpr {
     }
   }
 
-  private def cozyParseExpr(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(expr: CExpr): Either[String, Core.BoxedExpr] = {
-    import CExpr.*
+  def cozyParseExpr(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(expr: CozyExpr): Either[String, Core.BoxedExpr] = {
+    import CozyExpr.*
     expr match {
       case CBool(b) =>
         Right(Core.BoxedExpr.make(BoolSort(), Core.Const(Core.SortValue.BoolValue(b))))
@@ -273,7 +273,7 @@ object CozyToExpr {
               case Left(err) => Left(err)
             }
           case CSymbol(func, _) +: callArgs =>
-            val callList = callArgs.foldRight(List.empty[CExpr])(_ :: _)
+            val callList = callArgs.foldRight(List.empty[CozyExpr])(_ :: _)
             parseFuncCall(typeEnv, interpEnv)(func, callList)
           case _ =>
             Left(s"cozyParseExpr: unrecognized expression: $expr")
@@ -283,7 +283,7 @@ object CozyToExpr {
     }
   }
 
-  private def parseArraySelect(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(arrayExpr: CExpr, indexExpr: CExpr): Either[String, Core.BoxedExpr] = {
+  private def parseArraySelect(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(arrayExpr: CozyExpr, indexExpr: CozyExpr): Either[String, Core.BoxedExpr] = {
     (cozyParseExpr(typeEnv, interpEnv)(arrayExpr), cozyParseExpr(typeEnv, interpEnv)(indexExpr)).tupled match {
       case Right((arrBoxed, idxBoxed)) =>
         arrBoxed match {
@@ -299,7 +299,7 @@ object CozyToExpr {
     }
   }
 
-  private def parseArrayStore(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(arrayExpr: CExpr, indexExpr: CExpr, valueExpr: CExpr): Either[String, Core.BoxedExpr] = {
+  private def parseArrayStore(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(arrayExpr: CozyExpr, indexExpr: CozyExpr, valueExpr: CozyExpr): Either[String, Core.BoxedExpr] = {
     (cozyParseExpr(typeEnv, interpEnv)(arrayExpr),
       cozyParseExpr(typeEnv, interpEnv)(indexExpr),
       cozyParseExpr(typeEnv, interpEnv)(valueExpr)).tupled match {
@@ -321,7 +321,7 @@ object CozyToExpr {
     }
   }
 
-  private def parseFuncCall(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(funcCall: String, callArgs: List[CExpr]): Either[String, Core.BoxedExpr] = {
+  private def parseFuncCall(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(funcCall: String, callArgs: List[CozyExpr]): Either[String, Core.BoxedExpr] = {
     interpEnv(funcCall) match {
       case Some(funExpr) =>
         funExpr.e match {
@@ -353,7 +353,7 @@ object CozyToExpr {
   private def placeholderArgNames(arity: Int): List[String] =
     List.tabulate(arity)(i => s"arg_$i")
 
-  private def parseCallArguments(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(argDecls: List[(String, Core.BoxedSort)], subExprs: List[CExpr]): Either[String, Core.InterpList] = {
+  private def parseCallArguments(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(argDecls: List[(String, Core.BoxedSort)], subExprs: List[CozyExpr]): Either[String, Core.InterpList] = {
     if argDecls.size != subExprs.size then
       Left(s"parseCallArguments: argument count mismatch: expected ${argDecls.size}, got ${subExprs.size}")
     else

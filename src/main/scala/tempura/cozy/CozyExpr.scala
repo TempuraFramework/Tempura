@@ -1,18 +1,19 @@
 package tempura.cozy
 
 // representation of the Cozy fragment of Clojure
-enum CExpr {
+enum CozyExpr {
   case CNil()
   case CObject(obj: AnyRef)
   case CSymbol(name: String, namespace: String)
   case CKeyword(name: String, namespace: String)
-  case CSeq(args: Vector[CExpr])
-  case CMap(args: Map[CExpr, CExpr])
-  case CSet(args: Set[CExpr])
-  case CVec(args: Array[CExpr])
+  case CSeq(args: Vector[CozyExpr])
+  case CMap(args: Map[CozyExpr, CozyExpr])
+  case CSet(args: Set[CozyExpr])
+  case CVec(args: Array[CozyExpr])
   case CInt(arg: Long)
   case CString(arg: String)
   case CBool(arg: Boolean)
+  case CQuoted(subExpr: CozyExpr)
 
   override def toString: String = {
     this match {
@@ -27,12 +28,13 @@ enum CExpr {
       case CInt(number) => s"CInt(${number.toString}z)"
       case CString(s) => s"CString(${s})"
       case CBool(b) => s"CBool(${b})"
+      case CQuoted(subexpr) => s"'(${subexpr.toString})"
     }
   }
 
   override def equals(obj: Any): Boolean = {
     obj match {
-      case that: CExpr =>
+      case that: CozyExpr =>
         (this, that) match {
           case (CNil(), CNil()) => true
           case (CSymbol(name1, ns1), CSymbol(name2, ns2)) => name1 == name2 && ns1 == ns2
@@ -45,6 +47,7 @@ enum CExpr {
           case (CInt(n1), CInt(n2)) => n1 == n2
           case (CString(s1), CString(s2)) => s1 == s2
           case (CBool(b1), CBool(b2)) => b1 == b2
+          case (CQuoted(subexpr1), CQuoted(subexpr2)) => subexpr1 == subexpr2
           case _ => false
         }
       case _ => false
@@ -64,6 +67,7 @@ enum CExpr {
       case CInt(args) => args.##
       case CString(arg) => arg.##
       case CBool(arg) => arg.##
+      case CQuoted(subexpr) => subexpr.##
     }
   }
 }

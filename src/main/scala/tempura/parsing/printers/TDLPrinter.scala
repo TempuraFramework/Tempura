@@ -1,5 +1,6 @@
 package tempura.parsing.printers
 
+import tempura.cozy.AutoRegister
 import tempura.expression.Core.{InterpEnv, TypeEnv}
 import tempura.cozy.Transforms.*
 import tempura.helpers.Utils.unsupported
@@ -10,6 +11,7 @@ import tempura.transitions.TransitionSystem
 import scala.collection.mutable
 import scala.reflect.ClassTag
 
+@AutoRegister("print-tdl")
 object TDLPrinter extends Transform[(Core.TypeEnv, Core.InterpEnv, TransitionSystem), Tuple1[String]] {
   
   // user-friendly apply

@@ -64,20 +64,20 @@ object Core {
 
     override def toString: String = e.toString
   }
-  
+
   trait BoxedArrayExpr extends BoxedExpr {
     type D <: Sort[D]
     type R <: Sort[R]
     override type T = ArraySort[D, R]
-    override val e : Expr[ArraySort[D, R]]
-    override val sort : ArraySort[D, R]
+    override val e: Expr[ArraySort[D, R]]
+    override val sort: ArraySort[D, R]
   }
-  
+
   trait BoxedFunExpr extends BoxedExpr {
     type R <: Sort[R]
     override type T = FunSort[R]
-    override val e : Expr[FunSort[R]]
-    override val sort : FunSort[R]
+    override val e: Expr[FunSort[R]]
+    override val sort: FunSort[R]
   }
 
   object BoxedExpr {
@@ -125,7 +125,7 @@ object Core {
     override def hashCode(): Int = "Bool".hashCode()
   }
 
-  
+
   // Compound sorts.
   case class ArraySort[D <: Sort[D], R <: Sort[R]](val domainSort: D, val rangeSort: R)
     extends Sort[ArraySort[D, R]]("Array " + domainSort.toString + " " + rangeSort.toString) {
@@ -363,8 +363,8 @@ object Core {
       }
     }
   }
-  
-  final def canonicalNameOfValue[S <: Sort[S]](sortValue: SortValue[S]) : String = {
+
+  final def canonicalNameOfValue[S <: Sort[S]](sortValue: SortValue[S]): String = {
     sortValue match {
       case SortValue.BoolValue(b) => s"v_bool_${b}"
       case SortValue.NumericValue(n) => s"v_int_${n}"
@@ -379,14 +379,14 @@ object Core {
 
   trait BoxedSortValue {
     type T <: Sort[T]
-    val value : SortValue[T]
+    val value: SortValue[T]
 
     def toConst: Const[T] = Const(value)
-    
+
     override def toString: String = {
       "Boxed{" + value.toString + "}"
     }
-    
+
     override def hashCode(): Int =
       this.value.hashCode()
 
@@ -401,14 +401,14 @@ object Core {
   }
 
   extension [S <: Sort[S]](s: SortValue[S]) {
-    def box : BoxedSortValue =
+    def box: BoxedSortValue =
       new BoxedSortValue {
         override type T = S
         override val value = s
       }
   }
-  
-  
+
+
   trait BoxedSort {
     type S <: Sort[S]
     val sort: S
@@ -489,8 +489,8 @@ object Core {
       BoxedExpr.make(expr.sort, expr)
 
   object TransformInterpEnv {
-    def apply(interpEnv: InterpEnv, transform: ExprTransformer) : InterpEnv = {
-      val newInterpEnv = emptyInterpEnv 
+    def apply(interpEnv: InterpEnv, transform: ExprTransformer): InterpEnv = {
+      val newInterpEnv = emptyInterpEnv
       interpEnv.foreach(
         (name, entry) =>
           val newEntry = transform.transform(interpEnv)(entry)
@@ -499,7 +499,7 @@ object Core {
       newInterpEnv
     }
   }
-  
+
   class Env[T](n: String, d: scala.collection.mutable.Map[String, T]) {
     private val m: scala.collection.mutable.Map[String, T] = d
     private val name: String = n
@@ -508,6 +508,9 @@ object Core {
     // these are not copy-constructed upon ++@
     private var updateHook: Option[(String, T) => String] = None
     private var history: List[((String, T), String)] = List()
+
+    // HACK: auxilliary lookup function, see `addAuxLookupFunction`
+    private var auxLookupFunction: Option[String => Option[T]] = None
 
     def registerUpdateHook(f: (String, T) => String) =
       updateHook = Some(f)
@@ -544,7 +547,12 @@ object Core {
     }
 
     def lookup(s: String): Option[T] = {
-      this.m.get(s)
+      this.m.get(s) match {
+        case Some(t) => Some(t)
+        case None => auxLookupFunction flatMap {
+          f => f(s)
+        }
+      }
     }
 
     def contains(s: String): Boolean = {
@@ -564,7 +572,7 @@ object Core {
     def ++@(other: Env[T]): Env[T] = {
       new Env[T]("mergedFrom[" + this.name + ";" + other.name + "]", this.m ++ other.m)
     }
-    
+
     def merge(other: Env[T]): Env[T] = this ++@ other
 
     def apply(key: String): Option[T] = {
@@ -595,6 +603,15 @@ object Core {
           this
       }
     }
+
+    // RF: the following is a hack to allow users of the Clojure REPL
+    // to inject arbitrary variable definitions to a type / interpretation
+    // environment. We might want to restructure the code in the future
+    // to make this better.
+    def setAuxLookupFunction(f: String => Option[T]): Unit =
+      this.auxLookupFunction = Some(f)
+
+    def getAuxLookupFunction = this.auxLookupFunction
 
     override def toString: String = {
       "[< " + this.name + " {" + this.m.toString() + "} >]"
@@ -877,15 +894,15 @@ object Core {
 
   // unmatch a given expression
   object IsArrayExpr {
-    def unapply[D <: Sort[D], R <: Sort[R]](expr: BoxedExpr) : Option[Expr[ArraySort[D, R]]] = {
+    def unapply[D <: Sort[D], R <: Sort[R]](expr: BoxedExpr): Option[Expr[ArraySort[D, R]]] = {
       expr.sort match {
-        case a @ Core.ArraySort(d, r) if d.isInstanceOf[D] && r.isInstanceOf[R] =>
+        case a@Core.ArraySort(d, r) if d.isInstanceOf[D] && r.isInstanceOf[R] =>
           expr.unify(ArraySort[D, R](d.asInstanceOf[D], r.asInstanceOf[R]))
         case _ => None
       }
-    } 
+    }
   }
-  
+
   //
   // Methods for helping create expressions
   //
@@ -935,9 +952,9 @@ object Core {
   def mkImplies(lhs: Expr[BoolSort], rhs: Expr[BoolSort]): Expr[BoolSort] =
     mkBop("=>", lhs, rhs, BoolSort())
 
-  def mkIff(lhs: Expr[BoolSort], rhs: Expr[BoolSort]) : Expr[BoolSort] =
+  def mkIff(lhs: Expr[BoolSort], rhs: Expr[BoolSort]): Expr[BoolSort] =
     mkAnd(List(mkImplies(lhs, rhs), mkImplies(rhs, lhs)))
-  
+
   def mkIte[X <: Sort[X]](cond: Expr[BoolSort], thenBranch: Expr[X], elseBranch: Expr[X]): Expr[X] =
     mkTop("ite", cond, thenBranch, elseBranch, thenBranch.sort)
 
@@ -1021,11 +1038,11 @@ object Core {
     )
 
   def mkGlobally(body: Expr[BoolSort]): Expr[BoolSort] =
-    Core.mkUop("globally",  body, Core.BoolSort())
-  
+    Core.mkUop("globally", body, Core.BoolSort())
+
   def mkEventually(body: Expr[BoolSort]): Expr[BoolSort] =
     Core.mkUop("eventually", body, Core.BoolSort())
-  
+
   //
   // (Experimental and Z3-only)
   // Cardinality constraints

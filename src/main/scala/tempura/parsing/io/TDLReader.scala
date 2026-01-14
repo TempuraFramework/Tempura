@@ -1,9 +1,9 @@
 package tempura.parsing.io
 
 import scala.io.Source
-
 import scala.util.Using
 import cats.implicits.*
+import tempura.cozy.AutoRegister
 import tempura.cozy.Transforms.*
 import tempura.expression.Core
 import tempura.parsing.sexpr.{ParseTree, StringToSExprParser, TDLParser, VMTParser}
@@ -12,6 +12,7 @@ import tempura.transitions.{TransitionSystem, TransitionSystemBuffer}
 import java.nio.file.{Files, Paths}
 import scala.reflect.ClassTag
 
+@AutoRegister("read-tdl")
 object TDLReader extends Transform[Tuple1[String], Tuple1[TransitionSystem]] {
 
   override def apply(arg: Tuple1[String]): Either[String, Tuple1[TransitionSystem]] = {

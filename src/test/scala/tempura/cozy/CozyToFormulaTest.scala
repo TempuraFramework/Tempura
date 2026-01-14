@@ -6,7 +6,7 @@ import org.scalatest.BeforeAndAfterAll
 import tempura.expression.Core
 import tempura.expression.Core.*
 
-class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
+class CozyToFormulaTest extends AnyFunSuite with BeforeAndAfterAll {
 
   private var previousNs: CozyNamespace = _
   private var boolVar: Core.Expr[BoolSort] = _
@@ -51,16 +51,16 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
     super.afterAll()
   }
 
-  private def parse(expr: CExpr): Either[String, Core.BoxedExpr] =
-    CozyToExpr.cozyParseExpr(expr)
+  private def parse(expr: CozyExpr): Either[String, Core.BoxedExpr] =
+    CozyToFormula.cozyParseExpr(expr)
 
-  private def seq(args: CExpr*): CExpr =
-    CExpr.CSeq(args.toVector)
+  private def seq(args: CozyExpr*): CozyExpr =
+    CozyExpr.CSeq(args.toVector)
 
-  private def sym(name: String): CExpr =
-    CExpr.CSymbol(name, "user")
+  private def sym(name: String): CozyExpr =
+    CozyExpr.CSymbol(name, "user")
 
-  private def expectBool(expr: CExpr, expected: Core.Expr[BoolSort]): Unit =
+  private def expectBool(expr: CozyExpr, expected: Core.Expr[BoolSort]): Unit =
     parse(expr) match {
       case Right(boxed) =>
         boxed.unify(BoolSort()) match {
@@ -70,7 +70,7 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
       case Left(err) => fail(s"expected success but got $err")
     }
 
-  private def expectNumeric(expr: CExpr, expected: Core.Expr[NumericSort]): Unit =
+  private def expectNumeric(expr: CozyExpr, expected: Core.Expr[NumericSort]): Unit =
     parse(expr) match {
       case Right(boxed) =>
         boxed.unify(NumericSort()) match {
@@ -80,7 +80,7 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
       case Left(err) => fail(s"expected success but got $err")
     }
 
-  private def expectArray(expr: CExpr, expected: Core.Expr[ArraySort[NumericSort, NumericSort]]): Unit =
+  private def expectArray(expr: CozyExpr, expected: Core.Expr[ArraySort[NumericSort, NumericSort]]): Unit =
     parse(expr) match {
       case Right(boxed) =>
         boxed.unify(ArraySort(NumericSort(), NumericSort())) match {
@@ -90,7 +90,7 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
       case Left(err) => fail(s"expected success but got $err")
     }
 
-  private def assertLeft(expr: CExpr, fragment: String): Unit =
+  private def assertLeft(expr: CozyExpr, fragment: String): Unit =
     parse(expr) match {
       case Left(msg) => assert(msg.contains(fragment))
       case Right(value) =>
@@ -98,56 +98,56 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
     }
 
   test("parses literals, lookups and rejects missing symbols") {
-    expectBool(CExpr.CBool(true), Core.mkTrue)
-    expectNumeric(CExpr.CInt(7), Core.mkNumber(7))
+    expectBool(CozyExpr.CBool(true), Core.mkTrue)
+    expectNumeric(CozyExpr.CInt(7), Core.mkNumber(7))
     expectNumeric(sym("n"), numVar)
     assertLeft(sym("missing"), "variable missing not found")
-    assertLeft(CExpr.CSeq(Vector.empty), "empty sequence")
+    assertLeft(CozyExpr.CSeq(Vector.empty), "empty sequence")
   }
 
   test("boolean connectives, equality and implication") {
     expectBool(
-      seq(sym("and"), sym("b"), CExpr.CBool(true)),
+      seq(sym("and"), sym("b"), CozyExpr.CBool(true)),
       Core.mkAnd(List(boolVar, Core.mkTrue))
     )
     expectBool(
-      seq(sym("or"), CExpr.CBool(false), sym("b")),
+      seq(sym("or"), CozyExpr.CBool(false), sym("b")),
       Core.mkOr(List(Core.mkFalse, boolVar))
     )
-    expectBool(seq(sym("not"), CExpr.CBool(false)), Core.mkNot(Core.mkFalse))
+    expectBool(seq(sym("not"), CozyExpr.CBool(false)), Core.mkNot(Core.mkFalse))
     expectBool(
-      seq(sym("="), CExpr.CInt(1), CExpr.CInt(1)),
+      seq(sym("="), CozyExpr.CInt(1), CozyExpr.CInt(1)),
       Core.mkEq(Core.mkNumber(1), Core.mkNumber(1))
     )
-    assertLeft(seq(sym("="), CExpr.CInt(1), CExpr.CInt(1), CExpr.CInt(1)), "=")
+    assertLeft(seq(sym("="), CozyExpr.CInt(1), CozyExpr.CInt(1), CozyExpr.CInt(1)), "=")
     expectBool(
-      seq(sym("=>"), sym("b"), CExpr.CBool(false)),
+      seq(sym("=>"), sym("b"), CozyExpr.CBool(false)),
       Core.mkImplies(boolVar, Core.mkFalse)
     )
     expectNumeric(
-      seq(sym("=>"), sym("b"), CExpr.CInt(1), CExpr.CInt(2)),
+      seq(sym("=>"), sym("b"), CozyExpr.CInt(1), CozyExpr.CInt(2)),
       Core.mkIte(boolVar, Core.mkNumber(1), Core.mkNumber(2))
     )
   }
 
   test("ite expressions combine conditionals and branches") {
-    val cond = seq(sym("="), sym("n"), CExpr.CInt(0))
-    val iteExpr = seq(sym("ite"), cond, CExpr.CInt(1), CExpr.CInt(2))
+    val cond = seq(sym("="), sym("n"), CozyExpr.CInt(0))
+    val iteExpr = seq(sym("ite"), cond, CozyExpr.CInt(1), CozyExpr.CInt(2))
     expectNumeric(iteExpr, Core.mkIte(Core.mkEq(numVar, Core.mkNumber(0)), Core.mkNumber(1), Core.mkNumber(2)))
   }
 
   test("arithmetic operations include additive, multiplicative and negation variants") {
     expectNumeric(
-      seq(sym("+"), CExpr.CInt(1), CExpr.CInt(2), CExpr.CInt(3)),
+      seq(sym("+"), CozyExpr.CInt(1), CozyExpr.CInt(2), CozyExpr.CInt(3)),
       Core.mkAdd(List(Core.mkNumber(1), Core.mkNumber(2), Core.mkNumber(3)))
     )
     expectNumeric(
-      seq(sym("*"), CExpr.CInt(2), CExpr.CInt(4)),
+      seq(sym("*"), CozyExpr.CInt(2), CozyExpr.CInt(4)),
       Core.mkMul(List(Core.mkNumber(2), Core.mkNumber(4)))
     )
-    expectNumeric(seq(sym("-"), CExpr.CInt(5)), Core.mkNegative(Core.mkNumber(5)))
+    expectNumeric(seq(sym("-"), CozyExpr.CInt(5)), Core.mkNegative(Core.mkNumber(5)))
     expectNumeric(
-      seq(sym("-"), sym("n"), CExpr.CInt(1), CExpr.CInt(2)),
+      seq(sym("-"), sym("n"), CozyExpr.CInt(1), CozyExpr.CInt(2)),
       Core.mkMinus(numVar, Core.mkAdd(List(Core.mkNumber(1), Core.mkNumber(2))))
     )
   }
@@ -160,7 +160,7 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
       ">=" -> ((a, b) => Core.mkGe(a, b))
     )
     builders.foreach { case (op, mkCmp) =>
-      val expr = seq(sym(op), CExpr.CInt(0), CExpr.CInt(1), CExpr.CInt(2))
+      val expr = seq(sym(op), CozyExpr.CInt(0), CozyExpr.CInt(1), CozyExpr.CInt(2))
       val expected = Core.mkAnd(List(mkCmp(Core.mkNumber(0), Core.mkNumber(1)), mkCmp(Core.mkNumber(1), Core.mkNumber(2))))
       expectBool(expr, expected)
     }
@@ -172,7 +172,7 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
       Core.mkSelect(arrVar, numVar)
     )
     expectArray(
-      seq(sym("store"), sym("arr"), sym("n"), CExpr.CInt(42)),
+      seq(sym("store"), sym("arr"), sym("n"), CozyExpr.CInt(42)),
       Core.mkStore(arrVar, numVar, Core.mkNumber(42))
     )
   }
@@ -181,8 +181,8 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
     val forallExpr =
       seq(
         sym("forall"),
-        CExpr.CSeq(Vector(seq(sym("x"), sym("Int")))),
-        seq(sym("=>"), seq(sym("<"), sym("x"), CExpr.CInt(10)), seq(sym(">="), sym("n"), sym("x")))
+        CozyExpr.CSeq(Vector(seq(sym("x"), sym("Int")))),
+        seq(sym("=>"), seq(sym("<"), sym("x"), CozyExpr.CInt(10)), seq(sym(">="), sym("n"), sym("x")))
       )
     parse(forallExpr) match {
       case Right(boxed) =>
@@ -198,8 +198,8 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
     val existsExpr =
       seq(
         sym("exists"),
-        CExpr.CSeq(Vector(seq(sym("y"), sym("Int")))),
-        seq(sym("="), sym("y"), CExpr.CInt(5))
+        CozyExpr.CSeq(Vector(seq(sym("y"), sym("Int")))),
+        seq(sym("="), sym("y"), CozyExpr.CInt(5))
       )
     parse(existsExpr) match {
       case Right(boxed) =>
@@ -214,13 +214,13 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
   }
 
   test("function calls work for uninterpreted functions and macros") {
-    parse(seq(sym("f"), CExpr.CInt(1))) match {
+    parse(seq(sym("f"), CozyExpr.CInt(1))) match {
       case Right(boxed) =>
         assert(boxed.sort == NumericSort())
       case Left(err) => fail(s"expected uninterpreted call, got $err")
     }
 
-    parse(seq(sym("double"), CExpr.CInt(3))) match {
+    parse(seq(sym("double"), CozyExpr.CInt(3))) match {
       case Right(boxed) =>
         assert(boxed.sort == NumericSort())
       case Left(err) => fail(s"expected macro call, got $err")
@@ -228,6 +228,6 @@ class CozyToExprSuite extends AnyFunSuite with BeforeAndAfterAll {
   }
 
   test("unknown expressions surface descriptive failures") {
-    assertLeft(seq(sym("bogus"), CExpr.CBool(true)), "function bogus not found")
+    assertLeft(seq(sym("bogus"), CozyExpr.CBool(true)), "function bogus not found")
   }
 }

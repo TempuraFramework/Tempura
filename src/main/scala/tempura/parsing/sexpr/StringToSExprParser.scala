@@ -5,11 +5,12 @@ import cats.parse.Rfc5234.digit
 import cats.parse.{Parser, Parser0, Rfc5234}
 import tempura.cozy.Transforms.*
 import ParseTree.{INode, Leaf}
+import tempura.cozy.AutoRegister
 import tempura.expression.Core
 
 import scala.reflect.ClassTag
 
-
+@AutoRegister("parse-sexpr")
 object StringToSExprParser extends Transform[Tuple1[String], Tuple1[List[ParseTree]]] {
   val termSym: Parser[Char] = Parser.charIn("<=>+-/_!@#$%^&*:`~.,\\/")
   val blanks: Parser[Unit] = Parser.charIn(" \t\r\n").rep.void

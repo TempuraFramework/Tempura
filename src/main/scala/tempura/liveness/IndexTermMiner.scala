@@ -1,5 +1,6 @@
 package tempura.liveness
 
+import tempura.cozy.AutoRegister
 import tempura.cozy.Transforms.*
 import tempura.expression.Core
 import tempura.smt.SmtSolver
@@ -9,6 +10,7 @@ import tempura.transitions.TransitionSystem
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayDeque as Queue, Map as MMap}
 
+@AutoRegister("mine-index-term")
 object IndexTermMiner extends Transform[(SmtSolver.SolverEnvironment, TransitionSystem, StateGraph), Tuple1[Core.BoxedExpr]] {
 
   private def synthTerm[S <: Core.Sort[S]](solverEnv: SmtSolver.SolverEnvironment)

@@ -11,11 +11,13 @@ import scala.annotation.tailrec
 import scala.language.postfixOps
 import scala.reflect.ClassTag
 import cats.implicits.*
+import tempura.cozy.AutoRegister
 import tempura.cozy.Transforms.Transform
 import tempura.transitions.*
 import tempura.expression.Core
 import tempura.transitions.{StateVariable, TransitionSystem, TransitionSystemBuffer}
 
+@AutoRegister("parse-vmt")
 object VMTParser extends Transform[(Core.TypeEnv, Core.InterpEnv, List[ParseTree]), Tuple1[TransitionSystem]] {
   @tailrec
   def parse(typeEnv: Core.TypeEnv, interpEnv: Core.InterpEnv)(pts: TransitionSystemBuffer)(t: ParseTree): Either[(String, ParseTree), TransitionSystemBuffer] = {

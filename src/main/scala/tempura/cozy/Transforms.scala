@@ -9,56 +9,26 @@ import scala.deriving.Mirror
 import scala.compiletime.{constValueTuple, erasedValue, summonInline}
 import scala.reflect.ClassTag
 import cats.implicits.*
+import tempura.helpers.Utils.ReifyToTuple
 
 import java.nio.file.Path
 
 object Transforms {
 
-  // utilities for transforming a list of Any objects into a tuple
-  object ReifyToTuple {
-    inline def toTuple[T <: Tuple](xs: Seq[Any]): Either[String, T] =
-      decodeRec[T](xs.toList, 0)
-
-    private inline def decodeRec[T <: Tuple](xs: List[Any], i: Int): Either[String, T] =
-      inline erasedValue[T] match
-        case _: EmptyTuple =>
-          xs match
-            case Nil => Right(EmptyTuple.asInstanceOf[T])
-            case _ => Left(s"Too many args: expected $i, got ${i + xs.length}")
-
-        case _: (h *: t) =>
-          xs match
-            case Nil => Left(s"Missing arg #${i + 1}")
-            case x :: rest =>
-              for
-                head <- cast[h](x, i)
-                tail <- decodeRec[t](rest, i + 1)
-              yield (head *: tail).asInstanceOf[T]
-
-    private inline def cast[H](x: Any, i: Int): Either[String, H] =
-      inline erasedValue[H] match
-        case _: Int =>
-          x match
-            case j: java.lang.Integer => Right(j.intValue.asInstanceOf[H])
-            case _ => Left(s"arg#${i + 1}: expected Int, got ${x.getClass.getName}")
-
-        case _: Boolean =>
-          x match
-            case b: java.lang.Boolean => Right(b.booleanValue.asInstanceOf[H])
-            case _ => Left(s"arg#${i + 1}: expected Boolean, got ${x.getClass.getName}")
-
-        case _ =>
-          // For reference types, do an erased runtime check via ClassTag.
-          val ct = summonInline[ClassTag[H]] // summoning delayed until after inlining :contentReference[oaicite:2]{index=2}
-          if ct.runtimeClass.isInstance(x) then Right(x.asInstanceOf[H])
-          else Left(s"arg#${i + 1}: expected ${ct.runtimeClass.getName}, got ${x.getClass.getName}")
-  }
 
   // all callable transforms from
-  trait Transform[In <: Tuple, Out <: Tuple] { self => 
+  trait Transform[In <: Tuple, Out <: Tuple] {
+    self =>
     // self: Singleton => // XXX: don't restrict to singletons now, instead we use annotations to 
     // mark out what instances can be added to the set of Cozy primitives
     def apply(in: In): Either[String, Out]
+
+    def applyUntyped(args: List[Any]): AnyRef = {
+      Utils.ReifyToTuple.toTuple(args) flatMap { typedArgs => apply(typedArgs) } match {
+        case Right(out) => Utils.ReifyToTuple.fromTuple(out).asInstanceOf[AnyRef]
+        case Left(errMsg) => Utils.failwith("Transform.applyunTyped: " + errMsg)
+      }
+    }
   }
 
   // for calling from Clojure
@@ -122,33 +92,4 @@ object Transforms {
   : Either[String, c.Out] =
     c.run(input, transforms)
 
-  // ---------------------------------------------------------------------------
-  // Example passes (3 stages)
-  // ---------------------------------------------------------------------------
-  object Pass1_PathOf extends Transform[Tuple1[String], Tuple1[Path]]:
-    def apply(in: Tuple1[String]): Either[String, Tuple1[Path]] =
-      Right(Tuple1(Path.of(in._1)))
-
-  object Pass2_RequireScala extends Transform[Tuple1[Path], Tuple1[Path]]:
-    def apply(in: Tuple1[Path]): Either[String, Tuple1[Path]] =
-      val p = in._1
-      if p.toString.endsWith(".scala") then Right(Tuple1(p))
-      else Left(s"Not a .scala file: $p")
-
-  object Pass3_NameAndLen extends Transform[Tuple1[Path], (String, Int)]:
-    def apply(in: Tuple1[Path]) =
-      val name = in._1.getFileName.toString
-      Right((name, name.length))
-
-  // TODO: more this somewhere else.
-  def testCompose(): Unit =
-    // You can build the pipeline either way:
-    val pipeline1 = Pass1_PathOf *: Pass2_RequireScala *: Pass3_NameAndLen *: EmptyTuple
-    val pipeline2 = (Pass1_PathOf, Pass2_RequireScala) // also works
-
-    val ok = compose(Tuple1("src/Main.scala"), pipeline1)
-    val bad = compose(Tuple1("README.md"), pipeline1)
-
-    println(ok)
-    println(bad)
 }

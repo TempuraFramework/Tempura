@@ -7,6 +7,7 @@ import scala.annotation.tailrec
 import scala.language.postfixOps
 import scala.reflect.ClassTag
 import cats.implicits.*
+import tempura.cozy.AutoRegister
 import tempura.cozy.Transforms.*
 import tempura.transitions.*
 import tempura.expression.Core
@@ -14,6 +15,7 @@ import tempura.expression.Core.*
 import tempura.expression.Core.SortValue.*
 import tempura.helpers.Utils.*
 
+@AutoRegister("parse-smtlib")
 object SmtlibParser extends Transform[(TypeEnv, InterpEnv, ParseTree), Tuple1[Core.BoxedExpr]] {
   private def placeholderArgNames(arity: Int) = {
     (0 until arity).map(i => s"arg_$i").toList

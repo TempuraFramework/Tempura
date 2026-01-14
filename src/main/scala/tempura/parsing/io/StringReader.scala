@@ -1,5 +1,7 @@
 package tempura.parsing.io
 
+import tempura.cozy.AutoRegister
+
 import java.nio.file.Path
 import java.nio.file.Files
 import scala.io.Source
@@ -8,6 +10,7 @@ import tempura.cozy.Transforms.*
 
 import scala.reflect.ClassTag
 
+@AutoRegister("read-string")
 object StringReader extends Transform[Tuple1[Path], Tuple1[String]] {
 
   override def apply(arg: Tuple1[Path]): Either[String, Tuple1[String]] = {

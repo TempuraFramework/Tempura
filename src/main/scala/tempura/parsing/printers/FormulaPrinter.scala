@@ -1,5 +1,6 @@
 package tempura.parsing.printers
 
+import tempura.cozy.AutoRegister
 import tempura.expression.Core.{InterpEnv, TypeEnv}
 import tempura.cozy.Transforms.*
 import tempura.expression.Core
@@ -7,6 +8,7 @@ import tempura.smt.SmtLibSolver
 
 import scala.reflect.ClassTag
 
+@AutoRegister("print-smtlib")
 object FormulaPrinter extends Transform[(Core.TypeEnv, Core.InterpEnv, Core.BoxedExpr), Tuple1[String]] {
   override def apply(args: (Core.TypeEnv, Core.InterpEnv, Core.BoxedExpr)): Either[String, Tuple1[String]] = {
     val (typeEnv, interpEnv, fmla) = (args._1, args._2, args._3)

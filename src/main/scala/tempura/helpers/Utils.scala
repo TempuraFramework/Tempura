@@ -9,6 +9,7 @@ import tempura.expression.Core
 
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
+import scala.compiletime.{erasedValue, summonInline}
 import scala.reflect.*
 import scala.quoted.Type
 
@@ -412,5 +413,53 @@ object Utils {
     else
       None
       
-  final inline def erasure[T](t: T) : AnyRef = t.asInstanceOf[AnyRef]    
+  final inline def erasure[T](t: T) : AnyRef = t.asInstanceOf[AnyRef]
+
+  // utilities for transforming a list of Any objects into a tuple
+  object ReifyToTuple {
+    inline def toTuple[T <: Tuple](xs: Seq[Any]): Either[String, T] =
+      decodeRec[T](xs.toList, 0)
+
+    def fromTuple[T <: Tuple](tup: T) : Vector[Any] = {
+      tup match {
+        case a *: t => a +: fromTuple(t)
+        case emptyTuple =>  Vector()
+      }
+    }
+
+    private inline def decodeRec[T <: Tuple](xs: List[Any], i: Int): Either[String, T] =
+      inline erasedValue[T] match
+        case _: EmptyTuple =>
+          xs match
+            case Nil => Right(EmptyTuple.asInstanceOf[T])
+            case _ => Left(s"Too many args: expected $i, got ${i + xs.length}")
+
+        case _: (h *: t) =>
+          xs match
+            case Nil => Left(s"Missing arg #${i + 1}")
+            case x :: rest =>
+              for
+                head <- cast[h](x, i)
+                tail <- decodeRec[t](rest, i + 1)
+              yield (head *: tail).asInstanceOf[T]
+
+    private inline def cast[H](x: Any, i: Int): Either[String, H] =
+      inline erasedValue[H] match
+        case _: Int =>
+          x match
+            case j: java.lang.Integer => Right(j.intValue.asInstanceOf[H])
+            case _ => Left(s"arg#${i + 1}: expected Int, got ${x.getClass.getName}")
+
+        case _: Boolean =>
+          x match
+            case b: java.lang.Boolean => Right(b.booleanValue.asInstanceOf[H])
+            case _ => Left(s"arg#${i + 1}: expected Boolean, got ${x.getClass.getName}")
+
+        case _ =>
+          // For reference types, do an erased runtime check via ClassTag.
+          val ct = summonInline[ClassTag[H]] // summoning delayed until after inlining :contentReference[oaicite:2]{index=2}
+          if ct.runtimeClass.isInstance(x) then Right(x.asInstanceOf[H])
+          else Left(s"arg#${i + 1}: expected ${ct.runtimeClass.getName}, got ${x.getClass.getName}")
+  }
+
 }
