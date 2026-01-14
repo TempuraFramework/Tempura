@@ -313,17 +313,23 @@ object CS {
   
   CozyFunction.cozyFunction3("declare-var", COZY_SOLVER_OPS_NAMESPACE) { (solverEnv, name, sort) =>
     val solver = solverEnv.asInstanceOf[SolverEnvironment].solver
-    val varName = name.asInstanceOf[String]
-    val boxedSort = sort.asInstanceOf[Core.BoxedSort]
-    solver.declareVar(varName, boxedSort.sort).asInstanceOf[AnyRef]
+    convert(name) match {
+      case CSymbol(varName, _) =>
+        val boxedSort = sort.asInstanceOf[Core.BoxedSort]
+        solver.declareVar(varName, boxedSort.sort).asInstanceOf[AnyRef]
+
+      case _ => failwith(s"Cozy error: declare-var: illegal variable name ${name}")
+    }
   }
 
   CozyFunction.cozyFunction3("define-var", COZY_SOLVER_OPS_NAMESPACE) { (solverEnv, name, expr) =>
     val solver = solverEnv.asInstanceOf[SolverEnvironment].solver
-    val varName = name.asInstanceOf[String]
-    val boxedExpr = expr.asInstanceOf[BoxedExpr]
-    val (decl, axioms) = solver.defineVar(varName, boxedExpr.sort, boxedExpr.e)
-    RT.vector(decl, RT.seq(axioms.asJava))
+    (convert(name), CozyToFormula.cozyParseExpr(convert(expr))) match {
+      case (CSymbol(varName, _), Right(parsedExpr)) => 
+        val (decl, axioms) = solver.defineVar(varName, parsedExpr.sort, parsedExpr.e)
+        RT.seq(decl, RT.seq(axioms.asJava))
+      case _ => failwith(s"Cozy error: define var: illegal arguments ${name} and ${expr}")
+    }
   }
 
   CozyFunction.cozyFunction2("define-sort", COZY_SOLVER_OPS_NAMESPACE) { (solverEnv, sort) =>
