@@ -135,8 +135,8 @@ This namespace contains a set of routines for solver oprations including lowerin
   (c.solverOps/lift-sort solver sort)   ; Lift solver sort to Core sort
   (c.solverOps/lift-def solver func)    ; Lift solver func decl to Core expr
 
-  (c.solverOps/declare-var solver "varName" sort)    ; Declare uninterpreted var
-  (c.solverOps/define-var solver "varName" expr)     ; Define var, returns [decl axioms]
+  (c.solverOps/declare-var solver 'varName sort)    ; Declare uninterpreted var
+  (c.solverOps/define-var solver 'varName expr)     ; Define var, returns [decl axioms]
   (c.solverOps/define-sort solver sort)              ; Define sort in solver
   (c.solverOps/lower-sort solver sort)               ; Lower sort to solver sort
 ```
